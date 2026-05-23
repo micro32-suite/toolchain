@@ -1,9 +1,0 @@
-library "com.example.app"
-module LibTest
-
-  function Main()
-    print "[LibTest] library = com.example.app"
-    print "  ok"
-  end Main
-
-end LibTest
