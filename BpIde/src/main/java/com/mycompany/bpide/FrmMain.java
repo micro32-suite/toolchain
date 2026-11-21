@@ -1700,8 +1700,9 @@ public class FrmMain extends javax.swing.JFrame
         jMenuBar1.add(menuHelp);
     }
 
-    /** Portada de la documentación en la web, para cuando no está en local. */
-    private static final String DOCS_WEB = "https://legio-e.github.io/basicplus/";
+    /** Portada de la documentación en la web, para cuando no está en local. V8.1 (#802): BasicPlus, en la
+     *  organización micro32-suite (GitHub no redirige las páginas de un repositorio transferido). */
+    private static final String DOCS_WEB = "https://micro32-suite.github.io/BasicPlus/";
 
     private void showManual() {
         Path docs = IdePrefs.docsDir();
