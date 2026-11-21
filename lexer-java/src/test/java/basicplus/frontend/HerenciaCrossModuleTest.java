@@ -175,9 +175,9 @@ class HerenciaCrossModuleTest {
         b.sourceDir  = src.toString();
         b.outDir     = out.toString();
         b.main       = main;
-        File std = new File("../bpstdlib");
+        File std = new File("../../bpstdlib");
         Assumptions.assumeTrue(new File(std, "Core.mod").isFile(),
-                "hace falta ../bpstdlib/Core.mod (compila la stdlib antes de este test)");
+                "hace falta ../../bpstdlib/Core.mod (compila la stdlib antes de este test)");
         b.dependencies.add(std.getAbsolutePath());
         try {
             return Main.buildProject(b, "mivm", false);

@@ -20,8 +20,8 @@ import org.junit.jupiter.api.io.TempDir;
 class AotRecetasTest {
 
     private static Path ficheroReal() {
-        /* lexer-java/ → ../bpgenvm-c/include/bpvm_aot_recetas.h */
-        Path p = Paths.get("..", "bpgenvm-c", "include", AotRecetas.FICHERO);
+        /* lexer-java/ → ../../bpgenvm-c/include/bpvm_aot_recetas.h */
+        Path p = Paths.get("..", "..", "bpgenvm-c", "include", AotRecetas.FICHERO);
         assertTrue(Files.isRegularFile(p), "el .h de las recetas tiene que estar en " + p.toAbsolutePath());
         return p;
     }

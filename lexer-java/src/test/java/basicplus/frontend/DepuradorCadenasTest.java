@@ -101,7 +101,7 @@ class DepuradorCadenasTest {
 
         VirtualMachine vm = new VirtualMachine();
         ModuleManager mm = new ModuleManager(vm);
-        mm.setStdlibDir("../bpstdlib");          // el CWD de la prueba es lexer-java/
+        mm.setStdlibDir("../../bpstdlib");          // el CWD de la prueba es lexer-java/
         vm.setModuleManager(mm);
         DebugController controller = new DebugController();
         vm.setDebugHook(controller.hook());

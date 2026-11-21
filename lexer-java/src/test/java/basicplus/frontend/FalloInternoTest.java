@@ -53,7 +53,7 @@ class FalloInternoTest {
         VirtualMachine vm = new VirtualMachine();
         vm.setNumWorkers(workers);
         ModuleManager mm = new ModuleManager(vm);
-        mm.setStdlibDir("../bpstdlib");          // el CWD de la prueba es lexer-java/
+        mm.setStdlibDir("../../bpstdlib");          // el CWD de la prueba es lexer-java/
         vm.setModuleManager(mm);
         vm.setProgramOut(new OutputSink() {
             @Override public void writeText(String s) { salida.append(s); }

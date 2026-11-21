@@ -110,7 +110,7 @@ public final class AotRiscvPicSmoke {
             throws IOException, InterruptedException {
         String bpgenvm = Paths.get("").toAbsolutePath().resolve("bpgenvm-c").toString();
         if (!Files.isDirectory(Paths.get(bpgenvm))) {
-            bpgenvm = Paths.get("..").toAbsolutePath().normalize()
+            bpgenvm = Paths.get("..", "..").toAbsolutePath().normalize()   // V8.1: desde toolchain/BpIde
                            .resolve("bpgenvm-c").toString();
         }
         List<String> cmd = new ArrayList<>();

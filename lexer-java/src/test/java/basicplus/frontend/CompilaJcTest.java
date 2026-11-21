@@ -87,7 +87,7 @@ class CompilaJcTest {
     private static String corre(Path out, String main) throws Exception {
         VirtualMachine vm = new VirtualMachine();
         ModuleManager mm = new ModuleManager(vm);
-        mm.setStdlibDir("../bpstdlib");          // el CWD de la prueba es lexer-java/
+        mm.setStdlibDir("../../bpstdlib");          // el CWD de la prueba es lexer-java/
         vm.setModuleManager(mm);
         StringBuilder salida = new StringBuilder();
         vm.setProgramOut(new OutputSink() {

@@ -101,8 +101,8 @@ class JcParserTest {
     @Test
     @DisplayName("el ejemplo de V8_IDEAS hace la ida y vuelta: BP → JC → el mismo árbol")
     void idaYVueltaDelEjemplo() throws IOException {
-        Path doc = Paths.get("../docs/V8_IDEAS.md");
-        assumeTrue(Files.isRegularFile(doc), "hace falta ../docs/V8_IDEAS.md");
+        Path doc = Paths.get("../../docs/V8_IDEAS.md");
+        assumeTrue(Files.isRegularFile(doc), "hace falta ../../docs/V8_IDEAS.md");
         String d = new String(Files.readAllBytes(doc), StandardCharsets.UTF_8).replace("\r\n", "\n");
         int i = d.indexOf("### La primera fase, en un ejemplo");
         int ini = d.indexOf("```\nmodule Ejemplo\n  import", i) + 4;

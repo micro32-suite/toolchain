@@ -35,9 +35,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class InterfazIdaYVueltaTest {
 
     static Stream<Path> modulos() {
-        File std = new File("../bpstdlib");
+        File std = new File("../../bpstdlib");
         File[] mods = std.listFiles((d, n) -> n.endsWith(".mod"));
-        Assumptions.assumeTrue(mods != null && mods.length > 0, "hace falta ../bpstdlib/*.mod (compila la stdlib)");
+        Assumptions.assumeTrue(mods != null && mods.length > 0, "hace falta ../../bpstdlib/*.mod (compila la stdlib)");
         return Stream.of(mods).map(File::toPath).sorted();
     }
 
@@ -107,7 +107,7 @@ class InterfazIdaYVueltaTest {
         b.sourceDir  = src.toString();
         b.outDir     = out.toString();
         b.main       = "Juguete";
-        b.dependencies.add(new File("../bpstdlib").getAbsolutePath());
+        b.dependencies.add(new File("../../bpstdlib").getAbsolutePath());
         assertTrue(Main.buildProject(b, "mivm", false), "el módulo de juguete debe compilar");
         Path mod = out.resolve("Juguete.mod");
         String texto = new String(seccionInterface(mod), StandardCharsets.UTF_8);
@@ -168,7 +168,7 @@ class InterfazIdaYVueltaTest {
             BpBuild b = new BpBuild();
             b.projectDir = tmp.toString(); b.sourceDir = src.toString(); b.outDir = out.toString(); b.main = "Juguete";
             b.version = 7;
-            b.dependencies.add(new File("../bpstdlib").getAbsolutePath());
+            b.dependencies.add(new File("../../bpstdlib").getAbsolutePath());
             assertTrue(Main.buildProject(b, "mivm", false), "el módulo de juguete debe compilar en MOD9");
             Path mod = out.resolve("Juguete.mod");
             String texto = new String(seccionInterface(mod), StandardCharsets.UTF_8).replace("\r\n", "\n");
@@ -237,7 +237,7 @@ class InterfazIdaYVueltaTest {
         BpBuild b = new BpBuild();
         b.projectDir = tmp.toString(); b.sourceDir = src.toString(); b.outDir = out.toString(); b.main = "Juguete";
         b.version = 7;
-        b.dependencies.add(new File("../bpstdlib").getAbsolutePath());
+        b.dependencies.add(new File("../../bpstdlib").getAbsolutePath());
         assertTrue(Main.buildProject(b, "mivm", false), "el módulo de juguete debe compilar");
         Path mod = out.resolve("Juguete.mod");
         String texto = new String(seccionInterface(mod), StandardCharsets.UTF_8).replace("\r\n", "\n");

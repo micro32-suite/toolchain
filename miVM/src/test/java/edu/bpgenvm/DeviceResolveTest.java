@@ -26,7 +26,7 @@ class DeviceResolveTest {
 
     @Test
     void resuelveFrameDeSumaPorNombreYTipo() {
-        File dbg = new File("../samples/LocalsDbg.dbg");
+        File dbg = new File("../../samples/LocalsDbg.dbg");
         assumeTrue(dbg.isFile(),
                 "samples/LocalsDbg.dbg no compilado (--backend=mivm); test omitido");
 

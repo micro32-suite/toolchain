@@ -30,7 +30,7 @@ class HeapDescarriladoTest {
         boolean estropear = modo != 0;
         VirtualMachine vm = new VirtualMachine();
         ModuleManager mm = new ModuleManager(vm);
-        mm.setStdlibDir("../bpstdlib");          // el CWD de la prueba es lexer-java/
+        mm.setStdlibDir("../../bpstdlib");          // el CWD de la prueba es lexer-java/
         vm.setModuleManager(mm);
         StringBuilder salida = new StringBuilder();
         vm.setProgramOut(new OutputSink() {
@@ -60,7 +60,7 @@ class HeapDescarriladoTest {
     void heapDescarrilado(@TempDir Path tmp) throws Exception {
         Path src = Files.createDirectories(tmp.resolve("src"));
         Path out = Files.createDirectories(tmp.resolve("out"));
-        Files.copy(Paths.get("../bpgenvm-c/samples/HeapRoto.bp"), src.resolve("HeapRoto.bp"));
+        Files.copy(Paths.get("../../bpgenvm-c/samples/HeapRoto.bp"), src.resolve("HeapRoto.bp"));
         BpBuild b = new BpBuild();
         b.projectDir = tmp.toString();
         b.sourceDir  = src.toString();

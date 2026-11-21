@@ -44,7 +44,7 @@ class AsignacionDefinidaTest {
 
     private static List<String> errores(String cuerpo) { return errores(cuerpo, ""); }
 
-    /** Para lo que necesita Core (clases, excepciones): el build de verdad, con ../bpstdlib de dependencia.
+    /** Para lo que necesita Core (clases, excepciones): el build de verdad, con ../../bpstdlib de dependencia.
      *  Devuelve la salida del compilador. */
     private static String compilaConCore(Path tmp, String modulo, String fuente) throws IOException {
         Path src = Files.createDirectories(tmp.resolve("src"));
@@ -52,8 +52,8 @@ class AsignacionDefinidaTest {
         Files.write(src.resolve(modulo + ".bp"), fuente.getBytes(StandardCharsets.UTF_8));
         BpBuild b = new BpBuild();
         b.projectDir = tmp.toString(); b.sourceDir = src.toString(); b.outDir = out.toString(); b.main = modulo;
-        File std = new File("../bpstdlib");
-        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../bpstdlib/Core.mod");
+        File std = new File("../../bpstdlib");
+        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../../bpstdlib/Core.mod");
         b.dependencies.add(std.getAbsolutePath());
         PrintStream out0 = System.out, err0 = System.err;
         ByteArrayOutputStream buf = new ByteArrayOutputStream();

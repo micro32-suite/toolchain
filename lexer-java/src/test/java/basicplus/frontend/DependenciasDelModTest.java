@@ -80,7 +80,7 @@ class DependenciasDelModTest {
     @DisplayName("un módulo de biblioteca: com.acme.lib.LibMarcaBase (la regex cogía «com»)")
     void moduloDeBiblioteca(@TempDir Path tmp) throws Exception {
         Path std = StdlibDeTest.paraFormato(tmp).toPath();
-        Path samples = Paths.get("../bpgenvm-c/samples");
+        Path samples = Paths.get("../../bpgenvm-c/samples");
         Path out = compila(tmp, "LibMarcaUsa", std, new String[][] {
                 {"LibMarcaUsa.bp", new String(Files.readAllBytes(samples.resolve("LibMarcaUsa.bp")), "UTF-8")},
                 {"LibMarcaBase.bp", new String(Files.readAllBytes(samples.resolve("LibMarcaBase.bp")), "UTF-8")}});

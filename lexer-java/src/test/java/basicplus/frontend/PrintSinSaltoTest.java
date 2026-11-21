@@ -25,7 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
  */
 class PrintSinSaltoTest {
 
-    private static final Path SAMPLE = Paths.get("../bpgenvm-c/samples/PrintSinSalto.bp");   // CWD: lexer-java/
+    private static final Path SAMPLE = Paths.get("../../bpgenvm-c/samples/PrintSinSalto.bp");   // CWD: lexer-java/
 
     /** Compila `fuente` (módulo `main`) y lo corre en la miVM; devuelve lo que el programa imprime, sin más. */
     private static String compilaYCorre(Path tmp, String main, String fuente) throws Exception {
@@ -46,7 +46,7 @@ class PrintSinSaltoTest {
         }
         VirtualMachine vm = new VirtualMachine();
         ModuleManager mm = new ModuleManager(vm);
-        mm.setStdlibDir("../bpstdlib");
+        mm.setStdlibDir("../../bpstdlib");
         vm.setModuleManager(mm);
         StringBuilder salida = new StringBuilder();
         vm.setProgramOut(new OutputSink() {

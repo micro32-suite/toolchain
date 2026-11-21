@@ -122,7 +122,7 @@ public final class IdePrefs {
      *
      *  <p>Dos candidatos, en este orden y sin adivinar nada más:
      *  <ol><li>`docs/` junto al jar — la INSTALACIÓN, que es el caso del usuario;
-     *      <li>`../../docs` — el repo, cuando se ejecuta desde `BpIde/target/`
+     *      <li>`../../../docs` — el repo, cuando se ejecuta desde `toolchain/BpIde/target/`
      *          durante el desarrollo.</ol>
      *  null si no está en ninguno: quien llame manda al usuario a la web. */
     static Path docsDir() {
@@ -130,7 +130,7 @@ public final class IdePrefs {
         if (junto != null) return junto;
         Path root = installDir();
         if (root == null) return null;
-        Path repo = root.resolve("..").resolve("..").resolve("docs").normalize();
+        Path repo = root.resolve("..").resolve("..").resolve("..").resolve("docs").normalize();   // V8.1: toolchain/BpIde/target
         return Files.isDirectory(repo) ? repo : null;
     }
 

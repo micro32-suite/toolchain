@@ -74,8 +74,8 @@ class EscritorJcTest {
     @Test
     @DisplayName("el ejemplo de V8_IDEAS: el JC escrito a mano es el que sale")
     void ejemploDelDocumento() throws IOException {
-        Path doc = Paths.get("../docs/V8_IDEAS.md");
-        assumeTrue(Files.isRegularFile(doc), "hace falta ../docs/V8_IDEAS.md");
+        Path doc = Paths.get("../../docs/V8_IDEAS.md");
+        assumeTrue(Files.isRegularFile(doc), "hace falta ../../docs/V8_IDEAS.md");
         String d = new String(Files.readAllBytes(doc), StandardCharsets.UTF_8).replace("\r\n", "\n");
         int i = d.indexOf("### La primera fase, en un ejemplo");
         assertTrue(i >= 0, "el ejemplo ya no está en V8_IDEAS");

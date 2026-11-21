@@ -42,8 +42,8 @@ class EmisorConErroresTest {
         BpBuild b = new BpBuild();
         b.projectDir = tmp.toString(); b.sourceDir = src.toString(); b.outDir = out.toString(); b.main = main;
         b.version = 7;
-        File std = new File("../bpstdlib");
-        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../bpstdlib/Core.mod");
+        File std = new File("../../bpstdlib");
+        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../../bpstdlib/Core.mod");
         b.dependencies.add(std.getAbsolutePath());
         PrintStream out0 = System.out, err0 = System.err;
         ByteArrayOutputStream buf = new ByteArrayOutputStream();

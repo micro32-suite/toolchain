@@ -84,8 +84,8 @@ class BarajarTest {
         BpBuild b = new BpBuild();
         b.projectDir = dir.toString(); b.sourceDir = src.toString(); b.outDir = out.toString(); b.main = main;
         b.version = 7;
-        File std = new File("../bpstdlib");
-        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../bpstdlib/Core.mod");
+        File std = new File("../../bpstdlib");
+        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../../bpstdlib/Core.mod");
         b.dependencies.add(std.getAbsolutePath());
         b.dependencies.add(out.toString());   // la Lib copiada al out de Usa
         assertTrue(Main.buildProject(b, "mivm", false), main + " tiene que compilar (semilla " + Main.BARAJAR + ", relleno " + Main.RELLENO + ")");

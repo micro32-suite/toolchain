@@ -40,7 +40,7 @@ class ModuloNoCabeTest {
         return sb.toString();
     }
 
-    /** Como en EmisorConErroresTest: un proyecto con la stdlib de ../bpstdlib; {ok, lo que dijo el compilador}. */
+    /** Como en EmisorConErroresTest: un proyecto con la stdlib de ../../bpstdlib; {ok, lo que dijo el compilador}. */
     private static Object[] compila(Path tmp, String main, String fuente) throws IOException {
         Path src = Files.createDirectories(tmp.resolve("src"));
         Path out = Files.createDirectories(tmp.resolve("out"));
@@ -48,8 +48,8 @@ class ModuloNoCabeTest {
         BpBuild b = new BpBuild();
         b.projectDir = tmp.toString(); b.sourceDir = src.toString(); b.outDir = out.toString(); b.main = main;
         b.version = 7;
-        File std = new File("../bpstdlib");
-        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../bpstdlib/Core.mod");
+        File std = new File("../../bpstdlib");
+        Assumptions.assumeTrue(new File(std, "Core.mod").isFile(), "hace falta ../../bpstdlib/Core.mod");
         b.dependencies.add(std.getAbsolutePath());
         PrintStream out0 = System.out, err0 = System.err;
         ByteArrayOutputStream buf = new ByteArrayOutputStream();

@@ -26,8 +26,8 @@ class NamedLocalsDbgTest {
 
     @Test
     void functionForPcResuelveVarsDeSuma() throws Exception {
-        // CWD del test = miVM/ ; el sample vive en ../samples/.
-        File mod = new File("../samples/LocalsDbg.mod");
+        // CWD del test = miVM/ ; el sample vive en ../../samples/.
+        File mod = new File("../../samples/LocalsDbg.mod");
         assumeTrue(mod.isFile(),
                 "samples/LocalsDbg.mod no compilado (compila con --backend=mivm); test omitido");
 

@@ -147,7 +147,7 @@ class AotImportsTest {
         assertFalse(Files.exists(tmp.resolve("out").resolve("aot_X.c")), "no debe emitir C a ciegas");
     }
 
-    /** Un proyecto que usa una librería en pack ({@code "dependencies": ["../bpstdlib/sqlite/out"]}): el
+    /** Un proyecto que usa una librería en pack ({@code "dependencies": ["../../bpstdlib/sqlite/out"]}): el
      *  compilador la mira, y el AOT también. */
     @Test @DisplayName("#542: un import que sólo vive en una dependencia del proyecto — con ella traduce")
     void importDeUnaDependencia(@TempDir Path tmp) throws Exception {

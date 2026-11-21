@@ -124,10 +124,10 @@ class EncadenarCrossModuleTest {
          * cualquier proyecto real, que la recibe del IDE o del `.bpbuild`.
          * Si no aparece, se dice POR QUE en vez de fallar con un error de
          * compilacion que no apunta aqui. */
-        java.io.File std = new java.io.File("../bpstdlib");
+        java.io.File std = new java.io.File("../../bpstdlib");
         org.junit.jupiter.api.Assumptions.assumeTrue(
             new java.io.File(std, "Core.mod").isFile(),
-            "hace falta ../bpstdlib/Core.mod (compila la stdlib antes de este test)");
+            "hace falta ../../bpstdlib/Core.mod (compila la stdlib antes de este test)");
         b.dependencies.add(std.getAbsolutePath());
         return Main.buildProject(b, "mivm", false);
     }

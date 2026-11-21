@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Assumptions;
  * de {@code Core.Object} y el compilador tiene que ver {@code Core.mod}: igual que cualquier
  * proyecto real, que la recibe del IDE o del {@code .bpbuild}. Si no está, se dice por qué.
  *
- * <p>En MOD9 vale la versionada ({@code ../bpstdlib}). En MOD8 (formato de emergencia) no: una
+ * <p>En MOD9 vale la versionada ({@code ../../bpstdlib}). En MOD8 (formato de emergencia) no: una
  * clase con base externa necesita el LAYOUT de la base, que sólo publica la interfaz bpi 8, así
  * que se compila {@code Core.bp} como MOD8 en el temporal del test (Core no importa nada).
  */
@@ -22,11 +22,11 @@ final class StdlibDeTest {
 
     /** La carpeta con el {@code Core.mod} adecuado al {@link Main#FORMATO} vigente. */
     static File paraFormato(Path tmp) throws IOException {
-        File std = new File("../bpstdlib");
-        Assumptions.assumeTrue(new File(std, "Core.bp").isFile(), "hace falta ../bpstdlib/Core.bp");
+        File std = new File("../../bpstdlib");
+        Assumptions.assumeTrue(new File(std, "Core.bp").isFile(), "hace falta ../../bpstdlib/Core.bp");
         if (Main.FORMATO != 8) {
             Assumptions.assumeTrue(new File(std, "Core.mod").isFile(),
-                    "hace falta ../bpstdlib/Core.mod (compila la stdlib antes de este test)");
+                    "hace falta ../../bpstdlib/Core.mod (compila la stdlib antes de este test)");
             return std.getAbsoluteFile();
         }
         Path std8 = Files.createDirectories(tmp.resolve("std8"));
