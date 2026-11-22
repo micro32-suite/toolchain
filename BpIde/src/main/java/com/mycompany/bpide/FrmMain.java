@@ -1837,6 +1837,12 @@ public class FrmMain extends javax.swing.JFrame
         menuDebug.addSeparator();
         menuDebug.add(miToggleBP);
         jMenuBar1.add(menuDebug);
+        /* V9 H2.2 — F10 es «Step Over», pero Swing le da F10 a la barra de menús («takeFocus»: la enfoca, con el aspecto
+         * de Windows y con el de Java), y la barra mira su tecla ANTES que los atajos de sus menús: F10 nunca llegaba al
+         * paso, tampoco antes de los comandos (Eduardo, 22-nov: «F10 no»). Se le quita a la barra; el menú se sigue
+         * abriendo con Alt. */
+        jMenuBar1.getInputMap(javax.swing.JComponent.WHEN_IN_FOCUSED_WINDOW)
+                 .put(KeyStroke.getKeyStroke(KeyEvent.VK_F10, 0), "none");
 
         // Panels de depuración (3 nuevas pestañas en el panel inferior).
         localsModel = new LocalsTableModel();
