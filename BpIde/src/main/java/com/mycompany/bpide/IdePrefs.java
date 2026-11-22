@@ -116,6 +116,43 @@ public final class IdePrefs {
         return Files.isDirectory(cand) ? cand : null;
     }
 
+    /** V9 #867 — el BpVM.cfg de la INSTALACIÓN del IDE: junto al jar (el ZIP lo trae en su raíz) o subiendo desde él
+     *  (en el repo, el jar vive en toolchain/BpIde/target y el cfg en la raíz). Si no aparece ninguno, uno con las
+     *  carpetas que viajan junto al jar (bpstdlib/, bpdevices/); null si tampoco están. Es el respaldo de cuando un
+     *  fuente no tiene BpVM.cfg, ni subiendo desde él, y el IDE se lanzó desde una carpeta sin él: un programa de la
+     *  carpeta de la IA, por ejemplo, no encontraba ni {@code Core}. Se busca con sus propios pasos, no con
+     *  {@code loadDefaultFor}, que mira antes el cwd. */
+    static edu.bpgenvm.config.VmConfig cfgDeLaInstalacion() {
+        for (Path d = installDir(); d != null; d = d.getParent()) {
+            Path f = d.resolve(edu.bpgenvm.config.VmConfig.DEFAULT_FILENAME);
+            if (Files.isRegularFile(f)) {
+                try { return edu.bpgenvm.config.VmConfig.load(f); }
+                catch (IOException ex) {
+                    System.err.println("Advertencia: no se pudo leer " + f + ": " + ex.getMessage());
+                    break;   // existe pero ilegible: como loadDefaultFor, no se sigue subiendo
+                }
+            }
+        }
+        Path lib = installSubdir("bpstdlib");
+        if (lib == null) return null;
+        edu.bpgenvm.config.VmConfig c = edu.bpgenvm.config.VmConfig.defaults();
+        c.stdlibDir = lib.toString();
+        Path dev = installSubdir("bpdevices");
+        if (dev != null) c.devicesDir = dev.toString();
+        return c;
+    }
+
+    /** V9 #867 — el BpVM.cfg que manda para {@code ancla} (un fuente, una carpeta de salida; null = sólo el cwd): el de
+     *  siempre ({@code loadDefaultFor}: el cwd, o subiendo desde el ancla), y si no aparece ninguno, el de la
+     *  instalación del IDE. Lo mismo que hace el compilador (Main.setCfgDelHospedador): la stdlib con la que se compila
+     *  y la que se le da a la VM, o la que se sube a la placa, son la misma. Nunca null. */
+    static edu.bpgenvm.config.VmConfig cfgPara(Path ancla) {
+        edu.bpgenvm.config.VmConfig cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(ancla);
+        if (cfg.sourcePath != null) return cfg;
+        edu.bpgenvm.config.VmConfig suyo = cfgDeLaInstalacion();
+        return suyo != null ? suyo : cfg;
+    }
+
     /** #363 — la carpeta de documentación: los CINCO volúmenes + sus imágenes.
      *
      *  <p>Viven en la instalación (`docs/` junto al jar), no dentro del jar. Antes

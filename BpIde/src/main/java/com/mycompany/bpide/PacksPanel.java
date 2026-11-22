@@ -329,8 +329,8 @@ public final class PacksPanel extends JPanel {
                 edu.bpgenvm.config.VmConfig cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(
                         f.getAbsoluteFile().getParentFile().toPath());
                 if (cfg.sourcePath == null || cfg.stdlibDir == null || cfg.stdlibDir.isEmpty())
-                    cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(null);
-                if (cfg.sourcePath != null && cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty())
+                    cfg = IdePrefs.cfgPara(null);   // V9 #867: el del cwd, y sin él, el de la instalación
+                if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty())
                     sdir = java.nio.file.Paths.get(cfg.stdlibDir);
             } catch (Throwable sinCfg) { /* sin cfg: cuenta todo lo que importa y no lleva */ }
             java.util.List<String> usa = basicplus.frontend.PackStep.stdlibQueImporta(p.entries, sdir);

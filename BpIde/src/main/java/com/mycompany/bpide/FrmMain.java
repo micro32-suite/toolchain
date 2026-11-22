@@ -234,6 +234,9 @@ public class FrmMain extends javax.swing.JFrame
          * nosotros. Sin esto, `import X from pack Y` sólo encontraría los packs
          * recién construidos en el outDir del proyecto. */
         basicplus.frontend.Main.setPacksDir(IdePrefs.load().packsDirEffective());
+        /* V9 #867 — y por lo mismo, su BpVM.cfg: el de la instalación, para cuando el fuente no tiene ninguno (ni
+         * subiendo desde él) y el IDE se lanzó desde una carpeta sin él. Sólo es el respaldo: uno de verdad manda. */
+        basicplus.frontend.Main.setCfgDelHospedador(IdePrefs.cfgDeLaInstalacion());
         setupMvp();
     }
 
@@ -2589,6 +2592,13 @@ public class FrmMain extends javax.swing.JFrame
         JFileChooser fc = new JFileChooser();
         fc.setDialogTitle("La carpeta que puede tocar la IA");
         fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        /* Lo que es esa carpeta, dicho en el propio diálogo (Eduardo, al verlo por primera vez, no lo sabía). */
+        JLabel queEs = new JLabel("<html><body style='width:170px'>La IA sólo podrá abrir, guardar, subir y bajar"
+                + " ficheros dentro de esta carpeta y de sus subcarpetas.<br><br>Mejor una carpeta para el trabajo"
+                + " con la IA (se crea con el botón de carpeta nueva, arriba): no Documentos entero, ni una con"
+                + " ficheros privados.</body></html>");
+        queEs.setBorder(BorderFactory.createEmptyBorder(0, 10, 0, 4));
+        fc.setAccessory(queEs);
         File propuesta = pr.iaCarpeta != null ? new File(pr.iaCarpeta)
                 : currentProjectFile != null ? currentProjectFile.getParent().toFile()
                 : currentFile != null ? currentFile.getParent().toFile() : null;
@@ -2601,6 +2611,15 @@ public class FrmMain extends javax.swing.JFrame
             return Resultado.bien("cancelado");
         }
         Path carpeta = fc.getSelectedFile().toPath().toAbsolutePath().normalize();
+        if (demasiadoAmplia(carpeta)) {
+            int r = JOptionPane.showConfirmDialog(this, "Con " + carpeta + ", la IA podrá tocar todo lo que hay ahí"
+                    + " dentro.\n¿Seguro? (Mejor una carpeta sólo para el trabajo con la IA.)", "La carpeta de la IA",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+            if (r != JOptionPane.YES_OPTION) {
+                miServidorIa.setSelected(false);
+                return Resultado.bien("cancelado");
+            }
+        }
         try {
             servidorIa.arranca(pr.iaPuerto, carpeta);
         } catch (IOException ex) {
@@ -2614,6 +2633,14 @@ public class FrmMain extends javax.swing.JFrame
         appendConsola("[ia] servidor para la IA en " + servidorIa.url() + " — su carpeta: " + carpeta + "\n"
                 + "[ia] para conectar Claude Code (una vez, en una terminal): " + ordenParaConectar() + "\n");
         return Resultado.bien("en marcha en " + servidorIa.url());
+    }
+
+    /** ¿Una carpeta demasiado amplia para la IA? La raíz de un disco, la del usuario, Documentos o el Escritorio. */
+    private static boolean demasiadoAmplia(Path carpeta) {
+        if (carpeta.getParent() == null) return true;
+        Path casa = java.nio.file.Paths.get(System.getProperty("user.home")).toAbsolutePath().normalize();
+        return carpeta.equals(casa) || carpeta.equals(casa.resolve("Documents"))
+                || carpeta.equals(casa.resolve("Desktop"));
     }
 
     private String ordenParaConectar() {
@@ -3974,8 +4001,7 @@ public class FrmMain extends javax.swing.JFrame
         if (outDir != null) searchDirs.add(outDir);
         Path stdlibPath = null;
         try {
-            edu.bpgenvm.config.VmConfig cfg =
-                    edu.bpgenvm.config.VmConfig.loadDefaultFor(bpFile);
+            edu.bpgenvm.config.VmConfig cfg = IdePrefs.cfgPara(bpFile);   // V9 #867: sin cfg, el de la instalación
             if (cfg.devicesDir != null && !cfg.devicesDir.isEmpty())
                 searchDirs.add(java.nio.file.Paths.get(cfg.devicesDir));
             if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) {
@@ -4275,6 +4301,11 @@ public class FrmMain extends javax.swing.JFrame
             if (cfg.sourcePath != null && cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) {
                 return cfg.stdlibDir;
             }
+            // 4) V9 #867 — ninguno: la de la instalación del IDE, la misma con la que ha compilado
+            cfg = IdePrefs.cfgDeLaInstalacion();
+            if (cfg != null && cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) {
+                return cfg.stdlibDir;
+            }
         } catch (Throwable ignored) { /* sin cfg, devuelve null */ }
         return null;
     }
@@ -4304,8 +4335,7 @@ public class FrmMain extends javax.swing.JFrame
             /* MISMA fuente que usa la resolución de imports y que se le pasa a la
              * VM en --stdlibDir: si la VM lo va a resolver de ahí, la lista de lo
              * que NO hay que subir sale de ahí. */
-            edu.bpgenvm.config.VmConfig cfg =
-                    edu.bpgenvm.config.VmConfig.loadDefaultFor(anchor);
+            edu.bpgenvm.config.VmConfig cfg = IdePrefs.cfgPara(anchor);   // V9 #867: sin cfg, el de la instalación
             if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) {
                 Path dir = java.nio.file.Paths.get(cfg.stdlibDir);
                 if (Files.isDirectory(dir)) {

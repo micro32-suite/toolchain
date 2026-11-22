@@ -53,15 +53,15 @@ public final class VmJavaRunner {
         return Paths.get(home != null ? home : ".", ".bpide-vmjava");
     }
 
-    /** La stdlib que se le da: la del {@code BpVM.cfg} (el del directorio del IDE), y si no hay, la {@code bpstdlib/}
-     *  que viaja junto al jar en el ZIP. Null si no aparece ninguna: la VM la buscará por su cuenta. */
+    /** La stdlib que se le da: la del {@code BpVM.cfg} de la carpeta desde la que se lanzó el IDE, y si no hay, la de
+     *  su instalación (V9 #867: el cfg junto al jar o subiendo desde él; sin él, la {@code bpstdlib/} que viaja junto
+     *  al jar en el ZIP). Null si no aparece ninguna: la VM la buscará por su cuenta. */
     static String stdlibDir() {
         try {
-            edu.bpgenvm.config.VmConfig cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(null);
-            if (cfg.sourcePath != null && cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) return cfg.stdlibDir;
-        } catch (Throwable ignored) { /* sin cfg: la de la instalación */ }
-        Path junto = IdePrefs.installSubdir("bpstdlib");
-        return junto != null ? junto.toString() : null;
+            edu.bpgenvm.config.VmConfig cfg = IdePrefs.cfgPara(null);
+            if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) return cfg.stdlibDir;
+        } catch (Throwable ignored) { /* sin cfg legible: sin stdlib */ }
+        return null;
     }
 
     /** Arranca la VM Java escuchando en {@code port} y espera a que acepte conexiones. Devuelve el endpoint

@@ -58,6 +58,17 @@ public final class Main {
      *  de bpstdlib/ (la MOD8 del temporal, la que se sube a una placa): sin esto el sello
      *  `ifaceCrc` del consumidor era el de OTRA interfaz y la norma #500 rechazaba con razón. */
     public static String STDLIB_DIR = null;
+    /** V9 #867 — la configuración del HOSPEDADOR del compilador (el IDE: la de su instalación, el BpVM.cfg junto a su
+     *  jar). Es el respaldo de cuando no aparece NINGÚN BpVM.cfg, ni en el cwd ni subiendo desde el fuente: un programa
+     *  de la carpeta de la IA, con el IDE lanzado desde otra sin cfg, no encontraba ni `Core`. Nunca pisa a uno de
+     *  verdad: si después aparece, lo que se puso por éste se quita (Ctx.autodiscoverFromSource). Null = sin respaldo
+     *  (la línea de órdenes no lo pone: allí manda `--stdlibDir`). */
+    private static edu.bpgenvm.config.VmConfig cfgDelHospedador;
+
+    /** V9 #867 — fija (o quita, con null) la configuración del hospedador: ver {@link #cfgDelHospedador}. */
+    public static void setCfgDelHospedador(edu.bpgenvm.config.VmConfig cfg) {
+        cfgDelHospedador = cfg;
+    }
     /** V7/H2 (#523, V1) — el guardián del compilador: permutar las ranuras propias de cada clase
      *  (semilla; 0 = identidad) y meter n miembros privados de relleno. Ver {@link Barajar}. */
     public static int BARAJAR = 0, RELLENO = 0;
@@ -190,8 +201,16 @@ public final class Main {
         void autodiscoverFromSource(Path source) {
             try {
                 edu.bpgenvm.config.VmConfig cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(source);
-                addDepDirIfPresent(cfg.stdlibDir);
-                addDepDirIfPresent(cfg.devicesDir);
+                boolean delHospedador = false;
+                if (cfg.sourcePath != null) {
+                    quitaLoDelHospedador();   // #867: hay uno de verdad, y manda el suyo
+                } else if (cfgDelHospedador != null) {
+                    cfg = cfgDelHospedador;   // #867: ninguno, ni en el cwd ni subiendo desde el fuente
+                    delHospedador = true;
+                    usaElDelHospedador = true;
+                }
+                addDepDirIfPresent(cfg.stdlibDir, delHospedador);
+                addDepDirIfPresent(cfg.devicesDir, delHospedador);
                 if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()
                         && Files.isDirectory(Paths.get(cfg.stdlibDir))) {
                     stdlibDir = Paths.get(cfg.stdlibDir);   // #467: el último en llamar, el más específico
@@ -202,16 +221,33 @@ public final class Main {
             // V11 — la de la línea de órdenes gana siempre (se aplica en cada llamada, que es
             // justo lo que hace «más específico» al último en llamar).
             if (STDLIB_DIR != null) {
-                addDepDirIfPresent(STDLIB_DIR);
+                addDepDirIfPresent(STDLIB_DIR, false);
                 if (Files.isDirectory(Paths.get(STDLIB_DIR))) stdlibDir = Paths.get(STDLIB_DIR);
             }
         }
 
-        private void addDepDirIfPresent(String dirStr) {
+        /** #867 — si se está usando la configuración del hospedador. */
+        private boolean usaElDelHospedador;
+        /** #867 — las carpetas que añadió (no las que ya estaban): las que hay que quitar si aparece un cfg. */
+        private final List<Path> carpetasDelHospedador = new ArrayList<>();
+
+        /** #867 — apareció un BpVM.cfg de verdad (el ctor sólo mira el cwd; compileFile sube después desde el fuente):
+         *  fuera lo que se puso por el del hospedador. Si se quedara, sus carpetas irían DELANTE de las del cfg, y un
+         *  driver suyo taparía al del cfg del fuente: justo lo que #467 dice que no. */
+        private void quitaLoDelHospedador() {
+            if (!usaElDelHospedador) return;
+            dependencyPaths.removeAll(carpetasDelHospedador);
+            carpetasDelHospedador.clear();
+            stdlibDir = null;   // la pone el cfg que ha aparecido, si tiene
+            usaElDelHospedador = false;
+        }
+
+        private void addDepDirIfPresent(String dirStr, boolean delHospedador) {
             if (dirStr == null || dirStr.isEmpty()) return;
             Path d = Paths.get(dirStr);
             if (Files.isDirectory(d) && !dependencyPaths.contains(d)) {
                 dependencyPaths.add(d);
+                if (delHospedador) carpetasDelHospedador.add(d);
             }
         }
     }
