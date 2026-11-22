@@ -335,7 +335,12 @@ public enum OpCode {
     // crea el string en el heap, para que siga vivo cuando el módulo se descargue (Eduardo: «sigue en el heap y GC no lo
     // borra porque hay referencias vivas en A»). Los dos tamaños, como LEA_GLOBAL: un .mod mide lo mismo que antes.
     LEA_STR              (0xC2, OperandKind.SOFF_I16),
-    LEA_STR_S8           (0xC3, OperandKind.SOFF_I8);
+    LEA_STR_S8           (0xC3, OperandKind.SOFF_I8),
+    // V9 #781 — el PREFIJO de los datos lejanos, como el `wide` de la JVM: delante de una instrucción que lleva el
+    // desplazamiento de un DATO del módulo (llevaDato), cada uno de sus desplazamientos de dato va en 32 bits con signo,
+    // en vez de los 16 que sólo llegan a 64 KB por debajo del CS. Lo pone el compilador, y sólo cuando un dato no llega:
+    // un .mod que no lo necesita no cambia en un byte. El par cuenta como UNA instrucción (el depurador, el cuanto).
+    WIDE                 (0xC4, OperandKind.NONE);
 
     /** Byte estable que va a parar al fichero .mod. */
     public final byte code;
@@ -389,6 +394,42 @@ public enum OpCode {
         for (OpCode op : values()) {
             BY_CODE[op.code & 0xFF] = op;
         }
+    }
+
+    /** V9 #781 — las instrucciones que pueden ir tras WIDE: las que llevan el desplazamiento de un DATO del módulo (las
+     *  19 de la marca «doff» de OPCODES.md). Las variantes S8 no: ya llegan con su byte. */
+    private static final boolean[] LLEVA_DATO = new boolean[256];
+    static {
+        for (OpCode op : new OpCode[] { GET_GLOBAL, SET_GLOBAL, LEA_GLOBAL, GET_GLOBAL_I8, GET_GLOBAL_U8, GET_GLOBAL_I16,
+                GET_GLOBAL_U16, SET_GLOBAL_I8, SET_GLOBAL_I16, GET_GLOBAL_L, SET_GLOBAL_L, NEW_OBJECT, INSTANCEOF,
+                TRY_BEGIN, CHECKCAST, CHECKCAST_EXT, CHECKCAST_REF, CHECKCAST_IFAZ_REF, LEA_STR }) {
+            LLEVA_DATO[op.code & 0xFF] = true;
+        }
+    }
+
+    /** V9 #781 — ¿puede ir esta instrucción tras WIDE? (Sólo las que llevan el desplazamiento de un dato.) */
+    public static boolean llevaDato(int op) {
+        return LLEVA_DATO[op & 0xFF];
+    }
+
+    /** V9 #781 — los bytes del operando de una instrucción con dato tras WIDE: cada desplazamiento de dato pasa de 2 a 4;
+     *  lo demás (el handler de TRY_BEGIN, el idx de una ref, el cls_off que parchea el enlace en CHECKCAST_EXT), igual. */
+    public static int bytesAnchos(OpCode op) {
+        if (!llevaDato(op.code)) throw new IllegalArgumentException("WIDE delante de " + op + ", que no lleva un dato");
+        switch (op.operandKind) {
+            case SOFF_I16:            return 4;   // el dato
+            case TRY_HANDLER_I32_I16: return 8;   // el handler (i32) y la clase
+            case CLS_NAME_I16_I16:    return 8;   // la clase y el nombre
+            case CLS_NAME_I32_I16:    return 8;   // la clase (i32, parcheada) y el nombre
+            case IDX_U16_NAME_I16:    return 6;   // el idx de la ref (u16) y el nombre
+            default: throw new IllegalStateException("WIDE: " + op + " lleva un dato con un operando sin forma ancha");
+        }
+    }
+
+    /** V9 #781 — ¿llega este desplazamiento de dato en los 16 bits de siempre (desplazamientoDeDato: de -65 535 a -1, y
+     *  el 0 del centinela)? Si no, la instrucción va tras WIDE. */
+    public static boolean cabeEn16(int desplazamiento) {
+        return desplazamiento == 0 || (desplazamiento < 0 && desplazamiento >= -0xFFFF);
     }
 
     public static OpCode fromByte(byte b) {

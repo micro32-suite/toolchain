@@ -233,7 +233,10 @@ public class ModWriter {
      *  los saltos, cuando ya estan todos los descriptores. */
     private static class SelfCastFixup {
         final int codeOff; final String className;
-        SelfCastFixup(int codeOff, String className) { this.codeOff = codeOff; this.className = className; }
+        final boolean ancho;   // V9 #781: el hueco, de 32 bits (tras WIDE) y no de 16
+        SelfCastFixup(int codeOff, String className, boolean ancho) {
+            this.codeOff = codeOff; this.className = className; this.ancho = ancho;
+        }
     }
     private final List<SelfCastFixup> pendingSelfCasts = new ArrayList<>();
 
@@ -242,16 +245,25 @@ public class ModWriter {
      *  AHORA (declarada y sin descriptor todavía: éste se registra en endClass), devuelve 0 y
      *  deja el fixup de #447 para parcharlo al cerrar el módulo: `return Nodo()` dentro de un
      *  método de `Nodo` —una factoría de la propia clase— reventaba el compilador con una
-     *  excepción sin línea. `operandOff` es dónde va a quedar el u16 en el código. */
-    private short descriptorOAplazado(String className, int operandOff, String que) {
+     *  excepción sin línea. `operandOff` es dónde va a quedar el u16 en el código.
+     *  V9 #781 — devuelve el desplazamiento entero (el que escribe escribeDato); `ancho`, si la instrucción va tras WIDE:
+     *  entonces el hueco del parche es de 32 bits. */
+    private int descriptorOAplazado(String className, int operandOff, String que, boolean ancho) {
         Integer csOff = dataSymbolOffset.get(className);
-        if (csOff != null) return csOff.shortValue();
+        if (csOff != null) return csOff;
         // #751 — y si es una de más abajo (avisada por el emisor, preveClase), igual: su descriptor aún no está
         if (classes.containsKey(className) || previstas.containsKey(className)) {
-            pendingSelfCasts.add(new SelfCastFixup(operandOff, className));
+            pendingSelfCasts.add(new SelfCastFixup(operandOff, className, ancho));
             return 0;
         }
         throw new RuntimeException("Clase '" + className + "' no declarada para " + que);
+    }
+
+    /** V9 #781 — ¿va ancha una instrucción con el descriptor de `className`? Si ya está registrado, según llegue o no en
+     *  16 bits; si se aplaza, aplazadoAncho. */
+    private boolean descriptorAncho(String className) {
+        Integer csOff = dataSymbolOffset.get(className);
+        return csOff != null ? !OpCode.cabeEn16(csOff) : aplazadoAncho();
     }
 
     /** #751 — las clases locales del módulo, con si son abiertas (MOD9), que el emisor avisa ANTES de escribir código:
@@ -582,7 +594,9 @@ public class ModWriter {
         int csOffset = currentNegativeOffset - slot;
         // V8 #768 — el tope, 64 KB: el desplazamiento va en un word sin signo (OpCode.desplazamientoDeDato). Lo escriben
         // igual que antes, sus 16 bits bajos (.shortValue(), (short), los fixups de #447).
-        if (csOffset < -OpCode.DATOS_MAX) {
+        // V9 #781 — en MOD9, sin tope: lo que no llega en 16 bits va tras WIDE (prefijoAncho, escribeDato). El de 64 KB
+        // sigue en MOD8: una VM de MOD8 no conoce WIDE.
+        if (formato != 9 && csOffset < -OpCode.DATOS_MAX) {
             throw new DatosLlenos("el módulo '" + currentModuleName + "' no cabe: sus datos (los literales, las"
                     + " globales y las constantes) pasan de 64 KB, el tope (" + OpCode.DATOS_MAX + " bytes); ya ocupan "
                     + (-currentNegativeOffset) + " y " + (que != null ? que : "'" + name + "' (" + size + " bytes)")
@@ -1126,9 +1140,10 @@ public class ModWriter {
         exigeFormato9("CHECKCAST_REF");
         Integer nameOff = dataSymbolOffset.get(nameSym);
         if (nameOff == null) throw new RuntimeException("Literal '" + nameSym + "' no internado para CHECKCAST_REF");
+        boolean ancho = prefijoAncho(nameOff);   // V9 #781
         codeOut.writeByte(OpCode.CHECKCAST_REF.code); currentBytecodeSize += 1;
         emitRefOperand(refIdx);
-        codeOut.writeShort(nameOff.shortValue()); currentBytecodeSize += 2;
+        escribeDato(nameOff, ancho);
     }
     /** V8 H7.3 (#756) — la llamada por una interfaz: `INVOKE_IFAZ_REF idxIface u16, idxMet u16, nargs u8`. La
      *  interfaz va por una ref CLASE (su bloque) y el método por una REF_IFAZ_MET (su posición en ella). */
@@ -1151,9 +1166,10 @@ public class ModWriter {
         exigeFormato9("CHECKCAST_IFAZ_REF");
         Integer nameOff = dataSymbolOffset.get(nameSym);
         if (nameOff == null) throw new RuntimeException("Literal '" + nameSym + "' no internado para CHECKCAST_IFAZ_REF");
+        boolean ancho = prefijoAncho(nameOff);   // V9 #781
         codeOut.writeByte(OpCode.CHECKCAST_IFAZ_REF.code); currentBytecodeSize += 1;
         emitRefOperand(refIface);
-        codeOut.writeShort(nameOff.shortValue()); currentBytecodeSize += 2;
+        escribeDato(nameOff, ancho);
     }
     /** TRY_BEGIN por ref: handler i32 (relativo, como los demás TRY_BEGIN) + idx u16. Sin fixup lateral. */
     public void emitTryBeginRef(int handlerLabel, int refIdx) throws IOException {
@@ -1740,10 +1756,12 @@ public class ModWriter {
 
     public void emitNewObject(String className) throws IOException {
         if (porRefLocal(className)) { emitNewObjectRef(requireRef(REF_CLASE, DEP_LOCAL, className, "")); return; }   // #751
-        short csOff = descriptorOAplazado(className, currentBytecodeSize + 1, "NEW_OBJECT");   // #507
+        boolean ancho = descriptorAncho(className);   // V9 #781
+        if (ancho) emitWide();
+        int csOff = descriptorOAplazado(className, currentBytecodeSize + 1, "NEW_OBJECT", ancho);   // #507
         codeOut.writeByte(OpCode.NEW_OBJECT.code);
-        codeOut.writeShort(csOff);
-        currentBytecodeSize += 3;
+        currentBytecodeSize += 1;
+        escribeDato(csOff, ancho);
     }
 
     public void emitGetField(String className, String fieldName) throws IOException {
@@ -2133,9 +2151,10 @@ public class ModWriter {
             codeOut.writeByte((byte) offset);
             currentBytecodeSize += 2;
         } else {
+            boolean ancho = prefijoAncho(offset);   // V9 #781
             codeOut.writeByte(i16op.code);
-            codeOut.writeShort((short) offset);
-            currentBytecodeSize += 3;
+            currentBytecodeSize += 1;
+            escribeDato(offset, ancho);
         }
     }
 
@@ -2176,9 +2195,48 @@ public class ModWriter {
     private void emitGlobalAccess(String name, OpCode op) throws IOException {
         Integer off = dataSymbolOffset.get(name);
         if (off == null) throw new RuntimeException("Símbolo de datos no declarado (forward ref no permitida): " + name);
+        boolean ancho = prefijoAncho(off);   // V9 #781
         codeOut.writeByte(op.code);
-        codeOut.writeShort(off.shortValue());
-        currentBytecodeSize += 3;
+        currentBytecodeSize += 1;
+        escribeDato(off, ancho);
+    }
+
+    // --- V9 #781: los datos a más de 64 KB del CS (el prefijo WIDE) ---
+
+    /** V9 #781 — WIDE delante, si alguno de los desplazamientos de dato de la instrucción no llega en los 16 bits de
+     *  siempre (OpCode.cabeEn16). Devuelve si va ancha. Sólo pasa en MOD9: en MOD8 el tope de 64 KB (registerSymbol) no
+     *  deja que un dato quede más lejos. */
+    private boolean prefijoAncho(int... desplazamientos) throws IOException {
+        for (int d : desplazamientos) {
+            if (!OpCode.cabeEn16(d)) {
+                emitWide();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void emitWide() throws IOException {
+        codeOut.writeByte(OpCode.WIDE.code);
+        currentBytecodeSize += 1;
+    }
+
+    /** V9 #781 — un desplazamiento de dato: en 2 bytes (sus 16 bits bajos, como siempre), o en 4 tras WIDE. */
+    private void escribeDato(int desplazamiento, boolean ancho) throws IOException {
+        if (ancho) {
+            codeOut.writeInt(desplazamiento);
+            currentBytecodeSize += 4;
+        } else {
+            codeOut.writeShort((short) desplazamiento);
+            currentBytecodeSize += 2;
+        }
+    }
+
+    /** V9 #781 — ¿el descriptor de una clase aplazada (#447, #507) quedará, seguro, a más de 64 KB? Se registra después
+     *  (endClass), por debajo de todo lo que ya hay en el bloque de datos: si éste ya pasa del tope de 16 bits, sí, y el
+     *  hueco del parche va de 32. Si no, de 16, y si al parchear no llega, el compilador lo dice al cerrar el módulo. */
+    private boolean aplazadoAncho() {
+        return formato == 9 && !OpCode.cabeEn16(currentNegativeOffset - 4);
     }
 
     // --- Etiquetas ---
@@ -2219,7 +2277,11 @@ public class ModWriter {
         }
         Integer addr = currentLabelMap.get(handlerLabel);
         if (addr == null) throw new RuntimeException("Etiqueta no existe: " + handlerLabel);
+        // V9 #781 — con WIDE, la dirección de la instrucción es la del prefijo (el par es UNA instrucción): el handler es
+        // relativo a ella, como en miVM (currentPC) y en la VM-C (pc - 1 - ancho).
         int instrAddr = currentBytecodeSize;
+        boolean ancho = expectedClassName != null && descriptorAncho(expectedClassName);
+        if (ancho) emitWide();
         codeOut.writeByte(OpCode.TRY_BEGIN.code);
         if (addr != UNDECLARED) {
             codeOut.writeInt(addr - instrAddr);
@@ -2227,11 +2289,11 @@ public class ModWriter {
             pendingJumps.add(new JumpFixup(lastFunctionName, handlerLabel, instrAddr, currentBytecodeSize + 1));
             codeOut.writeInt(0);
         }
-        short expectedOff = 0;
+        int expectedOff = 0;
         if (expectedClassName != null)
-            expectedOff = descriptorOAplazado(expectedClassName, currentBytecodeSize + 5, "TRY_BEGIN");   // #507: tras opcode(1) + handler(4)
-        codeOut.writeShort(expectedOff);
-        currentBytecodeSize += 7;
+            expectedOff = descriptorOAplazado(expectedClassName, currentBytecodeSize + 5, "TRY_BEGIN", ancho);   // #507: tras opcode(1) + handler(4)
+        currentBytecodeSize += 5;
+        escribeDato(expectedOff, ancho);
     }
 
     /** Versión retro-compat: TRY_BEGIN genérico (atrapa cualquier excepción). */
@@ -2281,23 +2343,26 @@ public class ModWriter {
     public void emitCheckCastExt(String qualifiedClassName, String nameSym) throws IOException {
         Integer nameOff = dataSymbolOffset.get(nameSym);
         if (nameOff == null) throw new RuntimeException("Literal '" + nameSym + "' no internado para CHECKCAST_EXT");
-        int instrAddr = currentBytecodeSize;
+        boolean ancho = prefijoAncho(nameOff);   // V9 #781
+        int instrAddr = currentBytecodeSize;     // (tras el WIDE, si lo hay: el i32 va tras el opcode)
         codeOut.writeByte(OpCode.CHECKCAST_EXT.code);
         EhClassFixup fx = new EhClassFixup();
         fx.codeOff = instrAddr + 1;          /* el i32 va justo tras el opcode */
         fx.parentQualified = qualifiedClassName;
         ehClassFixups.add(fx);
         codeOut.writeInt(0);
-        codeOut.writeShort(nameOff.shortValue());
-        currentBytecodeSize += 7;
+        currentBytecodeSize += 5;
+        escribeDato(nameOff, ancho);
     }
 
     public void emitInstanceOf(String className) throws IOException {
         if (porRefLocal(className)) { emitInstanceOfRef(requireRef(REF_CLASE, DEP_LOCAL, className, "")); return; }   // #751
-        short csOff = descriptorOAplazado(className, currentBytecodeSize + 1, "INSTANCEOF");   // #507
+        boolean ancho = descriptorAncho(className);   // V9 #781
+        if (ancho) emitWide();
+        int csOff = descriptorOAplazado(className, currentBytecodeSize + 1, "INSTANCEOF", ancho);   // #507
         codeOut.writeByte(OpCode.INSTANCEOF.code);
-        codeOut.writeShort(csOff);
-        currentBytecodeSize += 3;
+        currentBytecodeSize += 1;
+        escribeDato(csOff, ancho);
     }
 
     /** #389 — CHECKCAST a una CLASE: el cast `Cosa(o)` comprueba en ejecución.
@@ -2312,17 +2377,20 @@ public class ModWriter {
          * mas lejos, que dejo Collections.bp sin poder recompilarse desde #389
          * sin que nadie lo notara (su .mod ya estaba hecho).
          * Se aplaza el operando en vez de reventar. */
-        boolean aplazado = false;
-        if (clsOff == null) {   // #507: la misma regla que NEW_OBJECT/INSTANCEOF/TRY_BEGIN
-            descriptorOAplazado(className, currentBytecodeSize + 1, "CHECKCAST");
-            aplazado = true;
-        }
         Integer nameOff = dataSymbolOffset.get(nameSym);
         if (nameOff == null) throw new RuntimeException("Literal '" + nameSym + "' no internado para CHECKCAST");
+        // V9 #781 — WIDE si la clase (o, aplazada, aplazadoAncho) o el nombre no llegan en 16 bits: los dos, en 32
+        boolean ancho = descriptorAncho(className) || !OpCode.cabeEn16(nameOff);
+        if (ancho) emitWide();
+        boolean aplazado = false;
+        if (clsOff == null) {   // #507: la misma regla que NEW_OBJECT/INSTANCEOF/TRY_BEGIN
+            descriptorOAplazado(className, currentBytecodeSize + 1, "CHECKCAST", ancho);
+            aplazado = true;
+        }
         codeOut.writeByte(OpCode.CHECKCAST.code);
-        codeOut.writeShort(aplazado ? 0 : clsOff.shortValue());
-        codeOut.writeShort(nameOff.shortValue());
-        currentBytecodeSize += 5;
+        currentBytecodeSize += 1;
+        escribeDato(aplazado ? 0 : clsOff, ancho);
+        escribeDato(nameOff, ancho);
     }
 
     /** #389 — CHECKCAST a CADENA: `string(o)`. cls_off=0 es el centinela del
@@ -2330,10 +2398,11 @@ public class ModWriter {
     public void emitCheckCastString(String nameSym) throws IOException {
         Integer nameOff = dataSymbolOffset.get(nameSym);
         if (nameOff == null) throw new RuntimeException("Literal '" + nameSym + "' no internado para CHECKCAST");
+        boolean ancho = prefijoAncho(nameOff);   // V9 #781
         codeOut.writeByte(OpCode.CHECKCAST.code);
-        codeOut.writeShort(0);
-        codeOut.writeShort(nameOff.shortValue());
-        currentBytecodeSize += 5;
+        currentBytecodeSize += 1;
+        escribeDato(0, ancho);
+        escribeDato(nameOff, ancho);
     }
 
     public void emitTryEnd() throws IOException {
@@ -2829,6 +2898,21 @@ public class ModWriter {
             if (off == null) {
                 throw new RuntimeException("Clase '" + fx.className
                         + "' sigue sin descriptor al cerrar el modulo (aplazado: NEW_OBJECT, INSTANCEOF, TRY_BEGIN o CHECKCAST)");
+            }
+            if (fx.ancho) {   // V9 #781: tras WIDE, el hueco es de 32 bits
+                rawCode[fx.codeOff]     = (byte) ((off >> 24) & 0xFF);
+                rawCode[fx.codeOff + 1] = (byte) ((off >> 16) & 0xFF);
+                rawCode[fx.codeOff + 2] = (byte) ((off >> 8)  & 0xFF);
+                rawCode[fx.codeOff + 3] = (byte) ( off        & 0xFF);
+                continue;
+            }
+            if (!OpCode.cabeEn16(off)) {
+                /* V9 #781 — el hueco es de 16 bits (al emitir, el bloque de datos aún no pasaba de 64 KB) y el descriptor ha
+                 * quedado más lejos: no se puede ensanchar ya la instrucción (los saltos están hechos). Un error del
+                 * programa, con lo que hay que hacer; no un .mod que lea otro dato. */
+                throw new DatosLlenos("el módulo '" + currentModuleName + "': la clase '" + fx.className + "' se usa"
+                        + " (NEW_OBJECT, INSTANCEOF, TRY_BEGIN o CHECKCAST) antes de tener su descriptor, y éste ha quedado a"
+                        + " más de 64 KB del código (" + off + "). Pon lo grande del módulo en otro módulo, o parte este en dos.");
             }
             rawCode[fx.codeOff]     = (byte) ((off >> 8) & 0xFF);
             rawCode[fx.codeOff + 1] = (byte) ( off       & 0xFF);

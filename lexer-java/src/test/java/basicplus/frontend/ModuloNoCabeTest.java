@@ -22,6 +22,8 @@ import static org.junit.jupiter.api.Assertions.*;
  * fuera de rango short… (data block excede 32 KB)» y detrás, en cascada, «Símbolo de datos no declarado (forward ref
  * no permitida): __str_0», que despistaba. El programa se genera aquí: uno de verdad pasa de 64 KB de fuente (por eso
  * no está en samples/errores). Que lo de 33 000 bytes corre igual en las dos VMs lo prueba DatosGrandes, del corpus.
+ * V9 #781 (22-nov) — el tope de 64 KB queda sólo en MOD8: en MOD9, lo que no llega en 16 bits va tras WIDE (y que eso
+ * corre igual en las dos VMs lo prueba DatosAnchos, del corpus).
  */
 class ModuloNoCabeTest {
 
@@ -60,12 +62,20 @@ class ModuloNoCabeTest {
         return new Object[]{ ok, new String(buf.toByteArray(), StandardCharsets.UTF_8) };
     }
 
-    @Test @DisplayName("más de 64 KB de datos: un error, el que lo dice, y ni .mod ni .dbg (el rancio, borrado)")
+    @Test @DisplayName("en MOD8, más de 64 KB de datos: un error, el que lo dice, y ni .mod ni .dbg (el rancio, borrado)")
     void noCabe(@TempDir Path tmp) throws IOException {
         Path out = Files.createDirectories(tmp.resolve("out"));
         Files.write(out.resolve("Lleno.mod"), new byte[]{ 1, 2, 3 });   // el gemelo rancio
         Files.write(out.resolve("Lleno.dbg"), new byte[]{ 4 });
-        Object[] r = compila(tmp, "Lleno", modulo("Lleno", repite('a', 40000), repite('b', 40000)));
+        // V9 #781 — el tope de 64 KB sigue sólo en MOD8 (una VM de MOD8 no conoce WIDE); en MOD9, ver sinTopeEnMod9
+        int antes = Main.FORMATO;
+        Object[] r;
+        try {
+            Main.FORMATO = 8;
+            r = compila(tmp, "Lleno", modulo("Lleno", repite('a', 40000), repite('b', 40000)));
+        } finally {
+            Main.FORMATO = antes;
+        }
         String t = (String) r[1];
         assertFalse((Boolean) r[0], "el build tiene que fallar:\n" + t);
         assertTrue(t.contains("el módulo 'Lleno' no cabe: sus datos (los literales, las globales y las constantes) pasan"
@@ -77,6 +87,17 @@ class ModuloNoCabeTest {
         assertTrue(t.contains("NO compilado:"), t);
         assertFalse(Files.exists(out.resolve("Lleno.mod")), "el .mod rancio sigue ahi");
         assertFalse(Files.exists(out.resolve("Lleno.dbg")), "el .dbg rancio sigue ahi");
+    }
+
+    @Test @DisplayName("V9 #781 — en MOD9, 80 000 bytes de datos compilan: lo que queda a más de 64 KB va tras WIDE")
+    void sinTopeEnMod9(@TempDir Path tmp) throws IOException {
+        Path out = Files.createDirectories(tmp.resolve("out"));
+        Files.write(out.resolve("Lleno.mod"), new byte[]{ 1, 2, 3 });   // el gemelo rancio, que se rehace
+        Object[] r = compila(tmp, "Lleno", modulo("Lleno", repite('a', 40000), repite('b', 40000)));
+        String t = (String) r[1];
+        assertTrue((Boolean) r[0], "tiene que compilar:\n" + t);
+        assertFalse(t.contains("no cabe"), t);
+        assertTrue(Files.size(out.resolve("Lleno.mod")) > 80000, "el .mod, con sus 80 000 bytes de datos");
     }
 
     @Test @DisplayName("33 000 bytes de datos (hasta el 3-nov, por encima del tope de 32 KB) compilan")

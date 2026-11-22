@@ -3525,6 +3525,11 @@ public final class SemanticAnalyzer {
         edu.bpgenvm.bytecode.OpCode op;
         try { op = edu.bpgenvm.bytecode.OpCode.valueOf(in.mnemonic); }
         catch (IllegalArgumentException e) { err(in.line, in.column, "'" + in.mnemonic + "' no es un opcode (ver docs/OPCODES.md)"); return; }
+        if (op == edu.bpgenvm.bytecode.OpCode.WIDE) {   // V9 #781: un prefijo, no una instrucción
+            err(in.line, in.column, "'inline WIDE': WIDE no se escribe a mano; lo pone el compilador delante de una instrucción"
+                    + " cuyo dato queda a más de 64 KB");
+            return;
+        }
         int esperados;
         switch (op.operandKind) {
             case NONE: esperados = 0; break;

@@ -511,8 +511,18 @@ public class Disasm {
             OperandKind kind = op.operandKind;
 
             StringBuilder hex = new StringBuilder(String.format("%02X", rawOp & 0xFF));
+            // V9 #781 — WIDE: la instrucción que sigue, con sus datos en 32 bits; el par, en una línea.
+            boolean ancho = false;
+            if (op == OpCode.WIDE && pc < code.length && OpCode.llevaDato(code[pc])) {
+                ancho = true;
+                op = OpCode.fromByte(code[pc]);
+                hex.append(String.format(" %02X", code[pc] & 0xFF));
+                pc++;
+                kind = op.operandKind;
+            }
+            int nBytes = ancho ? OpCode.bytesAnchos(op) : kind.bytes;
             long rawOperand = 0;
-            for (int j = 0; j < kind.bytes; j++) {
+            for (int j = 0; j < nBytes; j++) {
                 if (pc + j >= code.length) {
                     hex.append(" ??");
                     continue;
@@ -522,11 +532,12 @@ public class Disasm {
                 rawOperand = (rawOperand << 8) | (b & 0xFF);
             }
 
-            String operandStr = formatOperand(op, kind, rawOperand, instAddr, exports, imports);
-            pc += kind.bytes;
+            String operandStr = ancho ? formatOperandAncho(op, rawOperand, instAddr, imports)
+                                      : formatOperand(op, kind, rawOperand, instAddr, exports, imports);
+            pc += nBytes;
 
             String hexCol = String.format("%-15s", hex.toString());
-            out.printf("  +%04d  %s %-16s %s%n", instAddr, hexCol, op.name(), operandStr);
+            out.printf("  +%04d  %s %-16s %s%n", instAddr, hexCol, ancho ? "WIDE " + op.name() : op.name(), operandStr);
         }
     }
 
@@ -680,6 +691,39 @@ public class Disasm {
                 int numArgs = (int) (raw & 0xFF);
                 return String.format("ext[%d] ext[%d] args=%d  ; %s %s", idxI, idxM, numArgs,
                         nombreExt(idxI, imports), nombreExt(idxM, imports));
+            }
+            default:
+                return "?";
+        }
+    }
+
+    /** V9 #781 — los operandos de una instrucción tras WIDE: cada desplazamiento de dato, en 32 bits con signo
+     *  (OpCode.bytesAnchos dice cuántos bytes son). */
+    private static String formatOperandAncho(OpCode op, long raw, int instAddr, List<ImportEntry> imports) {
+        switch (op.operandKind) {
+            case SOFF_I16: {
+                int v = (int) raw;
+                String base = (op == OpCode.NEW_OBJECT || op == OpCode.INSTANCEOF) ? "class@CS" : "CS";
+                return String.format("%+d  ; [%s%+d]", v, base, v);
+            }
+            case TRY_HANDLER_I32_I16: {
+                int rel = (int) (raw >> 32);
+                int csOff = (int) raw;
+                String catchPart = (csOff == 0) ? "any" : String.format("class@CS%+d", csOff);
+                return String.format("handler=%+d (-> @%d), catch=%s", rel, instAddr + rel, catchPart);
+            }
+            case CLS_NAME_I16_I16:
+            case CLS_NAME_I32_I16: {
+                int cls = (int) (raw >> 32);
+                int nameOff = (int) raw;
+                String clsPart = (cls == 0) ? "string" : String.format("class@CS%+d", cls);
+                return String.format("%s name@CS%+d%s", clsPart, nameOff,
+                        op.operandKind == OperandKind.CLS_NAME_I32_I16 ? " [ext]" : "");
+            }
+            case IDX_U16_NAME_I16: {
+                int idx = (int) ((raw >> 32) & 0xFFFF);
+                int nameOff = (int) raw;
+                return String.format("ext[%d] name@CS%+d  ; %s", idx, nameOff, nombreExt(idx, imports));
             }
             default:
                 return "?";

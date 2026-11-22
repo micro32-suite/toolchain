@@ -56,4 +56,54 @@ class DatosDe64KTest {
         assertTrue(e.getMessage().contains("ya ocupan 40004 y el literal \"ABCDEFGHIJKLMNOPQRSTUVWX…\" (30000 bytes) no cabe"),
                 e.getMessage());
     }
+
+    // ---- V9 #781 (22-nov): en MOD9, sin tope; lo que no llega en 16 bits va tras WIDE ----
+
+    @Test @DisplayName("V9 #781 — en MOD9 el tope de 64 KB se va: el dato siguiente cabe, a -65 536")
+    void sinTopeEnMod9() {
+        ModWriter w = new ModWriter();
+        w.setFormato(9);
+        w.addModulo("Grande");
+        assertEquals(-OpCode.DATOS_MAX, w.addGlobalArray("a", (OpCode.DATOS_MAX - 4) / 4), "justo en el tope de 16 bits");
+        assertEquals(-OpCode.DATOS_MAX - 4, w.addConstantInt("x", 1), "y el siguiente, más allá");
+        assertFalse(OpCode.cabeEn16(-OpCode.DATOS_MAX - 4), "que va tras WIDE");
+    }
+
+    @Test @DisplayName("V9 #781 — qué llega en 16 bits: de -65 535 a -1, y el 0 del centinela")
+    void loQueCabe() {
+        assertTrue(OpCode.cabeEn16(0), "el centinela");
+        assertTrue(OpCode.cabeEn16(-1));
+        assertTrue(OpCode.cabeEn16(-OpCode.DATOS_MAX));
+        assertTrue(OpCode.cabeEn16(-0xFFFF), "el último que llega");
+        assertFalse(OpCode.cabeEn16(-0x10000), "su word sería el 0 del centinela");
+        assertFalse(OpCode.cabeEn16(-100000));
+        assertFalse(OpCode.cabeEn16(4), "un dato nunca está por encima del CS");
+    }
+
+    @Test @DisplayName("V9 #781 — WIDE va delante de las 19 que llevan un dato, y de ninguna más")
+    void lasDeDato() {
+        OpCode[] conDato = { OpCode.GET_GLOBAL, OpCode.SET_GLOBAL, OpCode.LEA_GLOBAL, OpCode.GET_GLOBAL_I8,
+                OpCode.GET_GLOBAL_U8, OpCode.GET_GLOBAL_I16, OpCode.GET_GLOBAL_U16, OpCode.SET_GLOBAL_I8,
+                OpCode.SET_GLOBAL_I16, OpCode.GET_GLOBAL_L, OpCode.SET_GLOBAL_L, OpCode.NEW_OBJECT, OpCode.INSTANCEOF,
+                OpCode.TRY_BEGIN, OpCode.CHECKCAST, OpCode.CHECKCAST_EXT, OpCode.CHECKCAST_REF, OpCode.CHECKCAST_IFAZ_REF,
+                OpCode.LEA_STR };
+        int n = 0;
+        for (OpCode op : OpCode.values()) {
+            boolean esperado = java.util.Arrays.asList(conDato).contains(op);
+            assertEquals(esperado, OpCode.llevaDato(op.code), op.name());
+            if (esperado) n++;
+        }
+        assertEquals(19, n);
+        assertFalse(OpCode.llevaDato(OpCode.GET_GLOBAL_S8.code), "la compacta ya llega con su byte");
+        assertFalse(OpCode.llevaDato(OpCode.GET_LOCAL.code), "un local no es un dato del módulo");
+        assertFalse(OpCode.llevaDato(OpCode.WIDE.code), "WIDE no va delante de WIDE");
+        // y el operando ancho: cada dato, de 2 a 4 bytes; lo demás, igual
+        assertEquals(4, OpCode.bytesAnchos(OpCode.GET_GLOBAL));
+        assertEquals(4, OpCode.bytesAnchos(OpCode.LEA_STR));
+        assertEquals(8, OpCode.bytesAnchos(OpCode.TRY_BEGIN), "el handler (i32) y la clase");
+        assertEquals(8, OpCode.bytesAnchos(OpCode.CHECKCAST), "la clase y el nombre");
+        assertEquals(8, OpCode.bytesAnchos(OpCode.CHECKCAST_EXT), "la clase (i32, parcheada) y el nombre");
+        assertEquals(6, OpCode.bytesAnchos(OpCode.CHECKCAST_REF), "el idx de la ref y el nombre");
+        assertThrows(IllegalArgumentException.class, () -> OpCode.bytesAnchos(OpCode.GET_LOCAL));
+    }
 }

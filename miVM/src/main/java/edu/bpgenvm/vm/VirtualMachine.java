@@ -3148,6 +3148,10 @@ public class VirtualMachine {
     private static int leeDato(byte[] mem, int addr) {
         return OpCode.desplazamientoDeDato(readI16(mem, addr));
     }
+    /** V9 #781 — y tras WIDE, el desplazamiento en 32 bits con signo (los datos a más de 64 KB del CS). */
+    private static int leeDato(byte[] mem, int addr, boolean ancho) {
+        return ancho ? readI32(mem, addr) : leeDato(mem, addr);
+    }
     private static void writeI32(byte[] mem, int addr, int v) {
         mem[addr]     = (byte) (v >> 24);
         mem[addr + 1] = (byte) (v >> 16);
@@ -3849,6 +3853,21 @@ public class VirtualMachine {
             int rawOp = mem[currentPC] & 0xFF;
             pc++;
 
+            // V9 #781 — WIDE: la instrucción que sigue lleva sus desplazamientos de dato en 32 bits (leeDato con `ancho`).
+            // El par es UNA instrucción: lo de arriba (el depurador) ya se ha hecho por las dos. Sólo puede ir delante de
+            // una que lleve un dato (OpCode.llevaDato); lo demás es un .mod roto, como un opcode desconocido.
+            boolean ancho = false;
+            if (rawOp == 0xC4) {
+                rawOp = mem[pc] & 0xFF;
+                pc++;
+                if (!OpCode.llevaDato(rawOp)) {
+                    tc.pc=pc; tc.sp=sp; tc.bp=bp; tc.cs=cs;
+                    throw new RuntimeException(String.format(
+                            "WIDE delante de un opcode sin dato: 0x%02X en PC %d", rawOp, currentPC));
+                }
+                ancho = true;
+            }
+
             if (tracing) {
                 tc.pc = pc; tc.sp = sp; tc.bp = bp; tc.cs = cs;
                 OpCode op = OpCode.fromByte((byte) rawOp);
@@ -3937,12 +3956,12 @@ public class VirtualMachine {
                 }
 
                 case 0x04: { // GET_GLOBAL
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     writeI32(mem, sp, readI32(mem, cs + off)); sp += 4;
                     break;
                 }
                 case 0x05: { // SET_GLOBAL
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     sp -= 4; int v = readI32(mem, sp);
                     writeI32(mem, cs + off, v);
                     break;
@@ -4151,7 +4170,7 @@ public class VirtualMachine {
                 }
 
                 case 0xC2: { // LEA_STR — V8 H9.1 (#786): un literal de cadena; fuera de un overlay, lo mismo que LEA_GLOBAL
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     if (cs >= overlayCs) {   // en un módulo de un overlay, un string del heap: sobrevive a la descarga
                         tc.pc=pc; tc.sp=sp; tc.bp=bp; tc.cs=cs;
                         long lit = allocVmString(readVmString(((long) (cs + off)) & 0xFFFFFFFFL));
@@ -4162,7 +4181,7 @@ public class VirtualMachine {
                     break;
                 }
                 case 0x1C: { // LEA_GLOBAL — H1.2a: dirección de global = ref 8 bytes
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     writeI64(mem, sp, ((long)(cs + off)) & 0xFFFFFFFFL); sp += 8;
                     break;
                 }
@@ -4429,37 +4448,37 @@ public class VirtualMachine {
                 }
 
                 case 0x40: { // GET_GLOBAL_I8
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     writeI32(mem, sp, (int) mem[cs + off]); sp += 4;
                     break;
                 }
                 case 0x41: { // GET_GLOBAL_U8
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     writeI32(mem, sp, mem[cs + off] & 0xFF); sp += 4;
                     break;
                 }
                 case 0x42: { // GET_GLOBAL_I16
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     int addr = cs + off;
                     int raw = ((mem[addr] & 0xFF) << 8) | (mem[addr + 1] & 0xFF);
                     writeI32(mem, sp, (short) raw); sp += 4;
                     break;
                 }
                 case 0x43: { // GET_GLOBAL_U16
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     int addr = cs + off;
                     int raw = ((mem[addr] & 0xFF) << 8) | (mem[addr + 1] & 0xFF);
                     writeI32(mem, sp, raw); sp += 4;
                     break;
                 }
                 case 0x44: { // SET_GLOBAL_I8
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     sp -= 4; int v = readI32(mem, sp);
                     mem[cs + off] = (byte) v;
                     break;
                 }
                 case 0x45: { // SET_GLOBAL_I16
-                    int off = leeDato(mem, pc); pc += 2;
+                    int off = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     sp -= 4; int val = readI32(mem, sp);
                     int addr = cs + off;
                     mem[addr]     = (byte) ((val >> 8) & 0xFF);
@@ -4536,7 +4555,7 @@ public class VirtualMachine {
                 // --- Clases y objetos ---
                 case 0x52: case 0xB7: { // NEW_OBJECT | NEW_OBJECT_REF (#523: desc = ext[idx], absoluto)
                     int classPtr;
-                    if (rawOp == 0x52) { int csOff = leeDato(mem, pc); pc += 2; classPtr = cs + csOff; }
+                    if (rawOp == 0x52) { int csOff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2; classPtr = cs + csOff; }
                     else { int idx = readI16(mem, pc) & 0xFFFF; pc += 2; classPtr = readI32(mem, moduleManager.getExternalTableAddressForCS(cs) + idx * 4); }
                     int numFields = readI16(mem, classPtr + CLS_OFF_NUM_FIELDS) & 0xFFFF;
                     tc.pc=pc; tc.sp=sp; tc.bp=bp; tc.cs=cs;
@@ -4757,12 +4776,12 @@ public class VirtualMachine {
                     break;
                 }
                 case 0x8B: { // GET_GLOBAL_L
-                    int soff = leeDato(mem, pc); pc += 2;
+                    int soff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     writeI64(mem, sp, readI64(mem, cs + soff)); sp += 8;
                     break;
                 }
                 case 0x8C: { // SET_GLOBAL_L
-                    int soff = leeDato(mem, pc); pc += 2;
+                    int soff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     sp -= 8; long v = readI64(mem, sp);
                     writeI64(mem, cs + soff, v);
                     break;
@@ -4955,7 +4974,7 @@ public class VirtualMachine {
                 case 0x5B: { // TRY_BEGIN
                     int instrAddr = currentPC;
                     int relOff = readI32(mem, pc); pc += 4;
-                    int expectedCsOff = leeDato(mem, pc); pc += 2;
+                    int expectedCsOff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     int newHandlerPc = instrAddr + relOff;
                     int expectedClassPtr = (expectedCsOff != 0) ? (cs + expectedCsOff) : 0;
                     handlerStack.push(new int[]{ehHandlerPc, ehSavedSp, ehSavedBp, ehSavedCs, ehExpectedClass});
@@ -5060,7 +5079,7 @@ public class VirtualMachine {
 
                 case 0x5E: case 0xB8: { // INSTANCEOF | INSTANCEOF_REF (#523: desc absoluto de ext[idx])
                     int expected;
-                    if (rawOp == 0x5E) { int csOff = leeDato(mem, pc); pc += 2; expected = cs + csOff; }
+                    if (rawOp == 0x5E) { int csOff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2; expected = cs + csOff; }
                     else { int idx = readI16(mem, pc) & 0xFFFF; pc += 2; expected = readI32(mem, moduleManager.getExternalTableAddressForCS(cs) + idx * 4); }
                     sp -= REF_SIZE; long ref = refLoad(mem, sp);
                     int objClass = classPtrOfRefOr0(ref);
@@ -5070,8 +5089,8 @@ public class VirtualMachine {
                 }
 
                 case 0xAF: { // CHECKCAST — #389, la mitad dinámica del cast de Object
-                    int clsOff  = leeDato(mem, pc); pc += 2;
-                    int nameOff = leeDato(mem, pc); pc += 2;
+                    int clsOff  = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
+                    int nameOff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     long ref = refLoad(mem, sp - REF_SIZE);   // peek: no consume
                     boolean ok = true;
                     if (ref != 0) {
@@ -5106,7 +5125,7 @@ public class VirtualMachine {
                     int expectedAbs;
                     if (rawOp == 0xB0) { int clsOff = readI32(mem, pc); pc += 4; expectedAbs = cs + clsOff; }
                     else { int idx = readI16(mem, pc) & 0xFFFF; pc += 2; expectedAbs = readI32(mem, moduleManager.getExternalTableAddressForCS(cs) + idx * 4); }
-                    int nameOff = leeDato(mem, pc); pc += 2;
+                    int nameOff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     long ref = refLoad(mem, sp - REF_SIZE);   // peek: no consume
                     boolean ok = true;
                     if (ref != 0) {
@@ -5335,7 +5354,7 @@ public class VirtualMachine {
                 case 0xC1: { // CHECKCAST_IFAZ_REF — V8 H7.3: como CHECKCAST_REF, contra la lista de interfaces
                     int idx = readI16(mem, pc) & 0xFFFF; pc += 2;
                     int ifaz = readI32(mem, moduleManager.getExternalTableAddressForCS(cs) + idx * 4);
-                    int nameOff = leeDato(mem, pc); pc += 2;
+                    int nameOff = leeDato(mem, pc, ancho); pc += ancho ? 4 : 2;
                     long ref = refLoad(mem, sp - REF_SIZE);   // peek: no consume
                     boolean ok = true;
                     if (ref != 0) {
