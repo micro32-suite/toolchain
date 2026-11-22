@@ -807,6 +807,20 @@ public class VirtualMachine {
     // arma handlePressure y la puerta de heapAlloc colecta (o crece). El margen cubre
     // los registros en vuelo entre un alloc y su register. Espejo de heap.c.
     private static final int HANDLE_MARCA = 64;
+
+    /**
+     * V9 #830 — tras la colecta de la marca, ¿la tabla sigue casi llena de vivos? Lo libre —lo que no se ha repartido
+     * nunca y lo reciclado— por debajo del 20 % de la tabla, o de 128 huecos con las tablas chicas. Hasta #830 la tabla
+     * sólo crecía si la colecta no reciclaba NINGÚN hueco: con los vivos cerca del tope reciclaba unos pocos, no crecía, y
+     * volvía a colectar en cuanto se gastaban (un modelo, en FICHAS #830: al 97 % vivo, 1610 colectas en 200 000
+     * reservas; con esto, 47). Hasta el 80 % vivo, las mismas colectas que antes. Se mira después de colectar: la basura
+     * no hace crecer la tabla. La misma regla que la VM-C (heap.c, tabla_casi_llena).
+     */
+    private boolean tablaCasiLlena() {
+        int cap = handleAddr.length;
+        int libres = Math.max(0, cap - handleNext) + handleFreeTop;
+        return libres < Math.max(128, cap / 5);
+    }
     private boolean handlePressure = false;
     // #430 — la excepción PREFABRICADA del OOM: se construye en el prólogo del run,
     // cuando construir es gratis, y se lanza cuando construir el error ya no cabe.
@@ -2112,8 +2126,10 @@ public class VirtualMachine {
                 // Resolver la presión: si la colecta recicló slots, resuelta; si
                 // no (todo VIVO), crecer aquí — donde crecer es una decisión y no
                 // un accidente en medio de un register.
+                // V9 #830 — y también si recicló pero la tabla sigue CASI LLENA de vivos (tablaCasiLlena): si no,
+                // volvería a colectar en cuanto se gastara lo reciclado. La misma regla que la VM-C (tabla_con_sitio).
                 if (handlePressure) {
-                    if (handleFreeTop > 0) {
+                    if (handleFreeTop > 0 && !tablaCasiLlena()) {
                         handlePressure = false;
                     } else {
                         handleAddr = java.util.Arrays.copyOf(handleAddr, handleAddr.length * 2);
