@@ -328,6 +328,11 @@ public class FrmMain extends javax.swing.JFrame
         setSize(1100, 720);
         setLocationRelativeTo(null);
 
+        // V9 H2.2 — los comandos del IDE (Comandos), antes que nada de la ventana: el menú, la barra y el panel de la
+        // placa se construyen con la Action de cada uno (la misma en el menú y en el botón). El panel registra los suyos.
+        comandos = new Comandos(this);
+        registraComandos();
+
         // -- RSyntaxTextArea: registrar el TokenMaker de BP UNA vez, antes de
         //    crear ningún editor. El estilo "text/bp" lo usa newEditorPane(). --
         AbstractTokenMakerFactory atmf =
@@ -500,10 +505,6 @@ public class FrmMain extends javax.swing.JFrame
                 updateErroresTabTitle(erroresTabIdx);
             }
         });
-
-        // V9 H2.2 — los comandos del IDE (Comandos): el menú y el botón, la misma Action de cada uno.
-        comandos = new Comandos(this);
-        registraComandos();
 
         // -- Menú File: New / Load / Save / Recent Files. --
         JMenuItem miNewFile = new JMenuItem(comandos.accion("nuevo"));   // H12 (#259)
@@ -797,7 +798,7 @@ public class FrmMain extends javax.swing.JFrame
 
         // FP4 — explorador del dispositivo Pico en el panel inferior izquierdo.
         // Envía el output del comando RUN remoto a la consola del IDE.
-        picoExplorer = new PicoExplorer();
+        picoExplorer = new PicoExplorer(comandos);   // V9 H2.2: registra los suyos (el panel de la placa)
         /* V8 #822 — el `stop` de la línea de comandos del explorador, como el botón Stop; y su `run`, con un programa en
          * marcha en el PC, no lanza otro. */
         picoExplorer.setStopDelIde(this::onStopRun);

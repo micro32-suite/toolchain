@@ -42,10 +42,15 @@ import java.awt.event.MouseEvent;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Enumeration;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 public final class PicoExplorer extends JPanel {
@@ -126,8 +131,14 @@ public final class PicoExplorer extends JPanel {
     private final JTree fileTree = new JTree(treeModel);
     private final JLabel status = new JLabel("Disconnected");
 
-    public PicoExplorer() {
+    /** V9 H2.2 — los comandos del IDE: el panel registra los suyos, y sus botones llevan la Action de cada uno (la misma
+     *  que usa quien lo llame por su nombre). */
+    private final Comandos comandos;
+
+    public PicoExplorer(Comandos comandos) {
         super(new BorderLayout());
+        this.comandos = comandos;
+        registraComandos();
 
         // Toolbar 3 filas: backend radio | endpoint (port/host) + connect |
         // acciones.
@@ -159,7 +170,7 @@ public final class PicoExplorer extends JPanel {
         { String ultima = IdePrefs.load().placaRed;
           if (ultima != null) redField.setText(ultima); }
         btnBuscar.setToolTipText("Pregunta a toda la red qué placas hay");
-        btnBuscar.addActionListener(e -> onBuscarPlacas());
+        conSuComando(btnBuscar, "placa_buscar");
         JPanel vmCard = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         vmCard.add(new JLabel("Endpoint:"));
         vmCard.add(endpointField);
@@ -187,15 +198,15 @@ public final class PicoExplorer extends JPanel {
         btnSimCfg.setIcon(SimIcons.gear(14));
         btnSimCfg.setToolTipText("Configurar el micro simulado (RAM, flash, pantalla…)");
         btnSimCfg.setMargin(new Insets(2, 4, 2, 4));
-        btnSim.addActionListener(e -> onToggleSim());
-        btnSimCfg.addActionListener(e -> onSimConfig());
+        conSuComando(btnSim, "micro_simulado");
+        conSuComando(btnSimCfg, "simulado_config");
         /* Si el IDE se cierra con el simulador en marcha, el proceso hijo se
          * quedaría huérfano ocupando el puerto → al siguiente arranque "no
          * aceptó conexiones" sin motivo aparente. */
         Runtime.getRuntime().addShutdownHook(new Thread(sim::stop, "bpvm-sim-stop"));
         btnVm.setIcon(SimIcons.chip(14));
         btnVm.setToolTipText("Arranca una VM Java en este PC, en el puerto del endpoint, y se conecta a ella");
-        btnVm.addActionListener(e -> onToggleVm());
+        conSuComando(btnVm, "vm_java");
         Runtime.getRuntime().addShutdownHook(new Thread(vmJava::stop, "vm-java-stop"));   // lo mismo: sin huérfanos
 
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
@@ -305,7 +316,7 @@ public final class PicoExplorer extends JPanel {
                     javax.swing.event.PopupMenuEvent e) {}
         });
 
-        btnConnect.addActionListener(e -> onConnect());
+        conSuComando(btnConnect, "placa_conectar");
         btnRefresh.addActionListener(e -> onRefresh());
         btnUpload.addActionListener(e -> onUpload());
         btnRun.addActionListener(e -> onRun());
@@ -322,6 +333,53 @@ public final class PicoExplorer extends JPanel {
 
         refreshPorts();
         setConnectedUI(false);
+    }
+
+    /* ===== V9 H2.2 — los comandos del panel de la placa (la cuarta tanda: primero, la conexión) ===== */
+
+    private void registraComandos() {
+        comandos.registra("placa_conectar", "Connect", this::conectar)
+                .parametro("conectar", "true conecta y false desconecta; sin él, alterna (como el botón)")
+                .parametro("tipo", "serie, red, vm o simulado (sin él, el que esté elegido en el panel)")
+                .parametro("donde", "el puerto (COM7), la IP de la placa o host:puerto de la VM Java; el simulado no"
+                        + " lo lleva");
+        comandos.registra("placa_buscar", "Buscar en la red", this::buscarPlacas)
+                .ayuda("Pregunta a toda la red qué placas hay")
+                .pide(() -> { Map<String, Object> p = new HashMap<>(); p.put("elegir", true); return p; });
+        comandos.registra("micro_simulado", "Micro simulado: arrancar o parar", this::microSimulado)
+                .ayuda("Arranca el micro simulado y se conecta a él")
+                .parametro("arrancar", "true lo arranca (y se conecta) y false lo para; sin él, alterna (como el"
+                        + " botón)");
+        comandos.registra("simulado_config", "Configurar el micro simulado", p -> {
+            onSimConfig();
+            return listo(Resultado.bien("hecho"));
+        }).ayuda("Configurar el micro simulado (RAM, flash, pantalla…)").soloVentana();
+        comandos.registra("vm_java", "VM Java en este PC: arrancar o parar", this::laVmJava)
+                .ayuda("Arranca una VM Java en este PC, en el puerto del endpoint, y se conecta a ella")
+                .parametro("arrancar", "true la arranca (y se conecta) y false la para; sin él, alterna (como el botón)")
+                .parametro("donde", "localhost:puerto (sin él, el del panel)");
+    }
+
+    /** El botón, con la Action de su comando. El texto, el icono y la ayuda que tenía se quedan: los que cambian con el
+     *  estado (Connect / Disconnect, Arrancar / Parar) los siguen poniendo setConnectedUI, updateSimUI y updateVmUI. */
+    private void conSuComando(AbstractButton b, String id) {
+        String texto = b.getText();
+        Icon icono = b.getIcon();
+        String ayuda = b.getToolTipText();
+        b.setAction(comandos.accion(id));
+        b.setText(texto);
+        b.setIcon(icono);
+        if (ayuda != null) b.setToolTipText(ayuda);
+    }
+
+    /** Un parámetro sí / no: lo que diga, o `siNoLoDicen`. */
+    private static boolean quiere(Map<String, Object> p, String clave, boolean siNoLoDicen) {
+        Object v = p.get(clave);
+        return v == null ? siNoLoDicen : Boolean.parseBoolean(v.toString());
+    }
+
+    private static CompletableFuture<Resultado> listo(Resultado r) {
+        return CompletableFuture.completedFuture(r);
     }
 
     /** Llamado por FrmMain para enchufar la consola del IDE. */
@@ -950,8 +1008,12 @@ public final class PicoExplorer extends JPanel {
         p.save();
     }
 
-    /** V8/H3 — «buscar en la red»: pregunta, y con una placa la pone en el campo; con varias, se elige. */
-    private void onBuscarPlacas() {
+    /** V8/H3 — «buscar en la red»: pregunta, y con una placa la pone en el campo; con varias, se elige.
+     *  V9 H2.2 — el comando «placa_buscar»: el resultado, las placas que contestan (su nombre, su micro y su dirección).
+     *  Elegir entre varias es de la ventana (su `pide` pone «elegir»); llamado por su nombre, la primera va al campo. */
+    private CompletableFuture<Resultado> buscarPlacas(Map<String, Object> p) {
+        final boolean elegir = Boolean.TRUE.equals(p.get("elegir"));
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         status.setText("Buscando placas en la red…");
         btnBuscar.setEnabled(false);
         runAsync(() -> {
@@ -959,19 +1021,39 @@ public final class PicoExplorer extends JPanel {
             catch (IOException sinRed) { return java.util.Collections.<BuscarPlacas.Placa>emptyList(); }
         }, placas -> {
             btnBuscar.setEnabled(!isConnected());
+            List<Map<String, Object>> lista = new ArrayList<>();
+            for (BuscarPlacas.Placa pl : placas) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("nombre", pl.nombre);
+                m.put("micro", pl.micro);
+                m.put("donde", pl.endpoint());
+                lista.add(m);
+            }
             if (placas.isEmpty()) {
                 status.setText("Ninguna placa ha contestado: ¿tienen la WiFi encendida y están en esta red?");
+                fin.complete(Resultado.bien("ninguna placa ha contestado").con("placas", lista));
                 return;
             }
             BuscarPlacas.Placa elegida = placas.get(0);
-            if (placas.size() > 1) {
+            if (placas.size() > 1 && elegir) {
                 elegida = (BuscarPlacas.Placa) JOptionPane.showInputDialog(this, "Placas en la red:", "Buscar en la red",
                         JOptionPane.PLAIN_MESSAGE, null, placas.toArray(), elegida);
-                if (elegida == null) { status.setText("Disconnected"); return; }
+                if (elegida == null) {
+                    status.setText("Disconnected");
+                    fin.complete(Resultado.bien("en la red: " + placas.size() + " placas; no se eligió ninguna")
+                            .con("placas", lista));
+                    return;
+                }
             }
             redField.setText(elegida.endpoint());
             status.setText("En la red: " + elegida);
+            fin.complete(Resultado.bien("en la red: " + placas.size() + " placa(s); en el campo, " + elegida.endpoint())
+                    .con("placas", lista).con("elegida", elegida.endpoint()));
+        }, motivo -> {
+            btnBuscar.setEnabled(!isConnected());
+            fin.complete(Resultado.mal("placa_buscar: " + motivo));
         });
+        return fin;
     }
 
     /** Helper UI: muestra el card correcto del CardLayout. */
@@ -1759,20 +1841,30 @@ public final class PicoExplorer extends JPanel {
     /** Botón del chip: arranca el simulador y se conecta, o desconecta y lo para.
      *  Worker propio en vez de runAsync porque aquí SÍ hace falta atender el fallo
      *  (dejar el botón usable y explicar qué pasó); runAsync no expone ese punto. */
-    private void onToggleSim() {
-        if (!btnSim.isEnabled()) return;         // ya hay un arranque en curso
-        if (sim.isRunning()) {
-            if (isConnected()) onConnect();      // toggle: aquí desconecta
+    /* V9 H2.2 — el comando «micro_simulado»: con `arrancar` (true o false) lo deja así; sin él, alterna como el botón. Al
+     * arrancarlo, el resultado es el de la conexión. */
+    private CompletableFuture<Resultado> microSimulado(Map<String, Object> p) {
+        if (!btnSim.isEnabled()) {   // ya hay un arranque en curso
+            return listo(Resultado.mal("micro_simulado: ya hay un arranque en curso"));
+        }
+        if (!quiere(p, "arrancar", !sim.isRunning())) {
+            if (!sim.isRunning()) return listo(Resultado.bien("el micro simulado no estaba en marcha"));
+            if (isConnected()) soltarConexion("Disconnected");   // toggle: aquí desconecta
             sim.stop();
             updateSimUI();
             status.setText("simulador parado");
-            return;
+            return listo(Resultado.bien("micro simulado parado"));
+        }
+        if (sim.isRunning()) {
+            return listo(Resultado.bien("el micro simulado ya estaba en marcha"
+                    + (isConnected() ? "" : "; sin conectar (placa_conectar)")));
         }
         final IdePrefs prefs = IdePrefs.load();
         rbSim.setSelected(true);
         showCard(CARD_SIM);
         status.setText("arrancando el simulador…");
         btnSim.setEnabled(false);
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         new SwingWorker<String, Void>() {
             @Override protected String doInBackground() throws Exception {
                 return sim.start(prefs);
@@ -1782,16 +1874,19 @@ public final class PicoExplorer extends JPanel {
                     String endpoint = get();
                     updateSimUI();
                     status.setText("simulador en " + endpoint + " — conectando…");
-                    if (!isConnected()) onConnect();   // ya escucha: conectar de verdad
+                    if (!isConnected()) conecta().thenAccept(fin::complete);   // ya escucha: conectar de verdad
+                    else fin.complete(Resultado.bien("micro simulado en " + endpoint + "; ya había otra conexión"));
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
                     status.setText("no arrancó el simulador");
                     emitLine("[sim ERROR] " + msg + "\n");
                     updateSimUI();
+                    fin.complete(Resultado.mal("micro_simulado: no arrancó: " + msg));
                 }
             }
         }.execute();
+        return fin;
     }
 
     /* ===== V9 #848 — la VM Java del PC como placa: arranque y parada ===== */
@@ -1806,24 +1901,35 @@ public final class PicoExplorer extends JPanel {
 
     /** Botón de la VM Java: la arranca en el puerto del endpoint (si es de este PC) y se conecta; o desconecta y la
      *  para. Como {@link #onToggleSim}, con su worker propio para atender el fallo. */
-    private void onToggleVm() {
-        if (!btnVm.isEnabled()) return;           // ya hay un arranque en curso
-        if (vmJava.isRunning()) {
-            if (isConnected()) onConnect();       // toggle: aquí desconecta
+    /* V9 H2.2 — el comando «vm_java»: con `arrancar` (true o false) la deja así; sin él, alterna como el botón; con
+     * `donde`, ese endpoint (localhost:puerto). Al arrancarla, el resultado es el de la conexión. */
+    private CompletableFuture<Resultado> laVmJava(Map<String, Object> p) {
+        if (!btnVm.isEnabled()) {   // ya hay un arranque en curso
+            return listo(Resultado.mal("vm_java: ya hay un arranque en curso"));
+        }
+        if (!quiere(p, "arrancar", !vmJava.isRunning())) {
+            if (!vmJava.isRunning()) return listo(Resultado.bien("la VM Java no estaba en marcha"));
+            if (isConnected()) soltarConexion("Disconnected");    // toggle: aquí desconecta
             vmJava.stop();
             updateVmUI();
             status.setText("VM Java parada");
-            return;
+            return listo(Resultado.bien("VM Java parada"));
         }
+        if (vmJava.isRunning()) {
+            return listo(Resultado.bien("la VM Java ya estaba en marcha"
+                    + (isConnected() ? "" : "; sin conectar (placa_conectar)")));
+        }
+        if (p.get("donde") != null) endpointField.setText(p.get("donde").toString().trim());
         final int port = VmJavaRunner.puertoLocal(endpointField.getText());
         if (port < 0) {
             status.setText("«Arrancar» pone una VM Java en ESTE PC: el endpoint, localhost:puerto");
-            return;
+            return listo(Resultado.mal("vm_java: «Arrancar» pone una VM Java en ESTE PC: el endpoint, localhost:puerto"));
         }
         rbVm.setSelected(true);
         showCard(CARD_VM);
         status.setText("arrancando la VM Java…");
         btnVm.setEnabled(false);
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         new SwingWorker<String, Void>() {
             @Override protected String doInBackground() throws Exception {
                 return vmJava.start(port);
@@ -1833,16 +1939,19 @@ public final class PicoExplorer extends JPanel {
                     String endpoint = get();
                     updateVmUI();
                     status.setText("VM Java en " + endpoint + " — conectando…");
-                    if (!isConnected()) onConnect();   // ya escucha: conectar de verdad
+                    if (!isConnected()) conecta().thenAccept(fin::complete);   // ya escucha: conectar de verdad
+                    else fin.complete(Resultado.bien("VM Java en " + endpoint + "; ya había otra conexión"));
                 } catch (Exception ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
                     status.setText("no arrancó la VM Java");
                     emitLine("[vm-java ERROR] " + msg + "\n");
                     updateVmUI();
+                    fin.complete(Resultado.mal("vm_java: no arrancó: " + msg));
                 }
             }
         }.execute();
+        return fin;
     }
 
     /** Botón del engranaje: la ventana de configuración del micro simulado. */
@@ -1909,17 +2018,68 @@ public final class PicoExplorer extends JPanel {
         new WifiDialog(SwingUtilities.getWindowAncestor(this), backend, status::setText).setVisible(true);
     }
 
-    private void onConnect() {
-        if (isConnected()) {
+    /**
+     * V9 H2.2 — el comando «placa_conectar», lo del botón Connect / Disconnect: con `conectar` (true o false) lo deja
+     * así; sin él, alterna como el botón. Con `tipo` y `donde`, elige antes el backend y su dirección (se ven en el
+     * panel, como si los hubiera elegido quien mira).
+     */
+    private CompletableFuture<Resultado> conectar(Map<String, Object> p) {
+        if (!quiere(p, "conectar", !isConnected())) {
+            if (!isConnected()) return listo(Resultado.bien("no había ninguna conexión"));
+            String antes = ultimoEndpoint;
             soltarConexion("Disconnected");
-            return;
+            return listo(Resultado.bien("desconectado" + (antes != null ? " de " + antes : "")));
         }
+        if (isConnected()) {
+            return listo(Resultado.bien("ya conectado a " + ultimoEndpoint).con("donde", ultimoEndpoint)
+                    .con("backend", backend.displayName()));
+        }
+        Resultado mal = eligeTipoYDonde(p);
+        if (mal != null) return listo(mal);
+        return conecta();
+    }
+
+    /** `tipo` y `donde` de «placa_conectar», al panel: el radio, su tarjeta y su campo. null si valen. */
+    private Resultado eligeTipoYDonde(Map<String, Object> p) {
+        Object tipo = p.get("tipo");
+        if (tipo != null) {
+            switch (tipo.toString().trim().toLowerCase(java.util.Locale.ROOT)) {
+                case "serie": case "serial": rbSerial.setSelected(true); showCard(CARD_SERIAL); break;
+                case "red":                  rbRed.setSelected(true);    showCard(CARD_RED);    break;
+                case "vm": case "vm_java":   rbVm.setSelected(true);     showCard(CARD_VM);     break;
+                case "simulado":             rbSim.setSelected(true);    showCard(CARD_SIM);    break;
+                default:
+                    return Resultado.mal("placa_conectar: el tipo es serie, red, vm o simulado, no «" + tipo + "»");
+            }
+        }
+        Object donde = p.get("donde");
+        if (donde != null) {
+            String d = donde.toString().trim();
+            if (rbSerial.isSelected()) {
+                refreshPorts();
+                portCombo.setSelectedItem(d);
+                if (!d.equalsIgnoreCase(String.valueOf(portCombo.getSelectedItem()))) {
+                    return Resultado.mal("placa_conectar: no hay ningún puerto " + d + "; los que hay: "
+                            + SerialPorts.listPorts());
+                }
+            } else if (rbRed.isSelected()) {
+                redField.setText(d);
+            } else if (rbVm.isSelected()) {
+                endpointField.setText(d);
+            }
+        }
+        return null;
+    }
+
+    /** La conexión, con lo elegido en el panel. El resultado, con el panel ya listo: el primer refresco y el INFO (la
+     *  arquitectura, que necesita el AOT de ejecutar en la placa). */
+    private CompletableFuture<Resultado> conecta() {
         final boolean serial = rbSerial.isSelected();
         final boolean red = rbRed.isSelected();
         final boolean simulado = rbSim.isSelected();
         if (simulado && !sim.isRunning()) {
             status.setText("el simulador no está en marcha — pulsa Arrancar");
-            return;
+            return listo(Resultado.mal("el micro simulado no está en marcha: arráncalo antes (micro_simulado)"));
         }
         /* El micro simulado habla el mismo wire por TCP: su "endpoint" no lo teclea
          * nadie, sale de la configuración con la que lo arrancamos. */
@@ -1930,7 +2090,8 @@ public final class PicoExplorer extends JPanel {
                            : endpointField.getText().trim();
         if (endpoint == null || endpoint.isEmpty()) {
             status.setText(serial ? "No port selected" : "Empty endpoint");
-            return;
+            return listo(Resultado.mal(serial ? "placa_conectar: no hay ningún puerto elegido"
+                                              : "placa_conectar: falta la dirección"));
         }
         // El nombre que se enseña sale de a QUÉ nos conectamos, no de la clase:
         // el mismo backend TCP sirve a la VM Java y al micro simulado.
@@ -1939,6 +2100,7 @@ public final class PicoExplorer extends JPanel {
                 () -> serial ? new SerialBackend() : red ? new RedBackend() : new BpvmBackend(nombreTcp);
         final Backend b = fabrica.get();
         status.setText("Connecting to " + endpoint + " (" + b.displayName() + ")...");
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> {
             String hello = b.connect(endpoint);
             return hello;
@@ -1951,10 +2113,15 @@ public final class PicoExplorer extends JPanel {
             setConnectedUI(true);
             if (red) recuerdaPlacaRed(endpoint);
             status.setText(endpoint + " — " + hello);
-            onRefresh();
-            fetchDeviceArch();           // H11: la arch, ANTES de que haga falta compilar
+            CompletableFuture<Resultado> arbol = refresca();
+            CompletableFuture<Void> arch = fetchDeviceArch();           // H11: la arch, ANTES de que haga falta compilar
             if (connectedSink != null) connectedSink.accept(debugClient());   // H9 escrutinio
-        });
+            CompletableFuture.allOf(arbol, arch).whenComplete((v, ex) -> fin.complete(
+                    Resultado.bien("conectado a " + endpoint + " — " + hello).con("donde", endpoint)
+                            .con("backend", b.displayName()).con("hola", hello)
+                            .con("arquitectura", archName(deviceArch))));
+        }, motivo -> fin.complete(Resultado.mal("no se pudo conectar a " + endpoint + ": " + motivo)));
+        return fin;
     }
 
     private void soltarConexion(String estado) {
@@ -2001,8 +2168,15 @@ public final class PicoExplorer extends JPanel {
      * mitad en su propio log (`ls: N ent en X ms | crc …`), así que las dos
      * medidas se pueden restar: lo que sobra es el viaje por el wire. */
     private void onRefresh() {
-        if (!isConnected()) return;
+        refresca();
+    }
+
+    /** V9 H2.2 — el refresco, con su resultado al acabar: los ficheros de la placa (su ruta, su tamaño, su CRC si la
+     *  placa lo da, y por qué no los cargaría, si es el caso), la memoria y las entradas que no cupieron. */
+    private CompletableFuture<Resultado> refresca() {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
         final Backend b = this.backend;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> {
             long t0 = System.currentTimeMillis();
             List<Backend.Entry> fs = b.list();
@@ -2042,7 +2216,20 @@ public final class PicoExplorer extends JPanel {
                         + " más que no caben en el recorrido (topes del listado plano)."
                         + " Usa `dir <carpeta>` en la consola para ver esa carpeta entera.");
             }
-        });
+            List<Map<String, Object>> lista = new ArrayList<>();
+            for (Backend.Entry e : fs) {
+                Map<String, Object> m = new LinkedHashMap<>();
+                m.put("ruta", e.name);
+                m.put("bytes", e.size);
+                if (e.isDir) m.put("carpeta", true);
+                if (e.crc >= 0) m.put("crc", e.crc);
+                if (e.mal != null) m.put("mal", e.mal);
+                lista.add(m);
+            }
+            fin.complete(Resultado.bien(fs.size() + " ficheros" + (omitidas > 0 ? "; faltan " + omitidas : ""))
+                    .con("ficheros", lista).con("memoria", mem).con("omitidas", omitidas));
+        }, motivo -> fin.complete(Resultado.mal("refrescar: " + motivo)));
+        return fin;
     }
 
     /** Reconstruye el árbol a partir de la lista plana del LS.
@@ -2566,34 +2753,41 @@ public final class PicoExplorer extends JPanel {
      * que el AOT simplemente no se ofrece (y el módulo corre interpretado, que
      * es correcto). No falla nada por no saberlo.
      */
-    private void fetchDeviceArch() {
+    private CompletableFuture<Void> fetchDeviceArch() {
         final BpvmClient dc = debugClient();
-        if (dc == null) return;
+        final CompletableFuture<Void> fin = new CompletableFuture<>();   // V9 H2.2: al acabar (vaya bien o mal)
+        if (dc == null) { fin.complete(null); return fin; }
         runAsync(() -> dc.getInfo(4000), m -> {
-            if (m == null) return;
-            long a = ilong(m, "arch");
-            deviceArch = (int) a;
-            /* #441 — y la receta, si el firmware la publica (V7/H2). */
-            deviceFlagsCrc = ilong(m, "aotFlagsCrc") & 0xFFFFFFFFL;
-            deviceReceta   = istr(m, "aotReceta");
-            deviceMdnAbi   = (int) ilong(m, "mdnAbi");   /* V7/H5 (27-sep); 0 si el firmware no lo manda */
-            /* V8/H3: si la placa tiene red, su IP queda para conectarse por ella. */
-            String ip = istr(m, "ip");
-            if (ip != null && !ip.isEmpty() && !rbRed.isSelected()) {
-                recuerdaPlacaRed(ip);
-                redField.setText(ip);
-            }
-            if (a != 0 && outputSink != null) {
-                outputSink.accept("[Explorer] la placa ejecuta nativo "
-                        + archName((int) a) + " (arch=" + a + ")"
-                        + (deviceFlagsCrc != 0
-                           ? String.format(", receta %s (huella %08x)", deviceReceta, deviceFlagsCrc)
-                           : "")
-                        + (deviceMdnAbi != 0 ? ", ABI de helpers " + deviceMdnAbi : ""));
-                String aviso = avisoAbi(deviceMdnAbi);
-                if (aviso != null) outputSink.accept("[Explorer] ⚠ " + aviso);
-            }
-        });
+            try { apuntaElInfo(m); } finally { fin.complete(null); }
+        }, motivo -> fin.complete(null));
+        return fin;
+    }
+
+    /** Lo del INFO que se guarda al conectar: la arquitectura, la receta, la ABI y la IP. */
+    private void apuntaElInfo(java.util.Map<String, Object> m) {
+        if (m == null) return;
+        long a = ilong(m, "arch");
+        deviceArch = (int) a;
+        /* #441 — y la receta, si el firmware la publica (V7/H2). */
+        deviceFlagsCrc = ilong(m, "aotFlagsCrc") & 0xFFFFFFFFL;
+        deviceReceta   = istr(m, "aotReceta");
+        deviceMdnAbi   = (int) ilong(m, "mdnAbi");   /* V7/H5 (27-sep); 0 si el firmware no lo manda */
+        /* V8/H3: si la placa tiene red, su IP queda para conectarse por ella. */
+        String ip = istr(m, "ip");
+        if (ip != null && !ip.isEmpty() && !rbRed.isSelected()) {
+            recuerdaPlacaRed(ip);
+            redField.setText(ip);
+        }
+        if (a != 0 && outputSink != null) {
+            outputSink.accept("[Explorer] la placa ejecuta nativo "
+                    + archName((int) a) + " (arch=" + a + ")"
+                    + (deviceFlagsCrc != 0
+                       ? String.format(", receta %s (huella %08x)", deviceReceta, deviceFlagsCrc)
+                       : "")
+                    + (deviceMdnAbi != 0 ? ", ABI de helpers " + deviceMdnAbi : ""));
+            String aviso = avisoAbi(deviceMdnAbi);
+            if (aviso != null) outputSink.accept("[Explorer] ⚠ " + aviso);
+        }
     }
 
     /** Nombre legible de la arquitectura del nativo (e_machine del ELF). */
@@ -2806,6 +3000,12 @@ public final class PicoExplorer extends JPanel {
     private interface IOAction<T> { T run() throws IOException; }
 
     private <T> void runAsync(IOAction<T> task, Consumer<T> onSuccess) {
+        runAsync(task, onSuccess, null);
+    }
+
+    /** V9 H2.2 — y quien quiera saber si falló (un comando, para su resultado): `onFailure` recibe el motivo, en el
+     *  hilo de la ventana, después de lo de siempre (el estado y la consola). */
+    private <T> void runAsync(IOAction<T> task, Consumer<T> onSuccess, Consumer<String> onFailure) {
         setActionButtonsEnabled(false);
         new SwingWorker<T, Void>() {
             @Override protected T doInBackground() throws Exception {
@@ -2835,6 +3035,10 @@ public final class PicoExplorer extends JPanel {
                         if (outputSink != null) {
                             outputSink.accept("[Placa ERROR] " + msg);
                         }
+                    }
+                    if (onFailure != null) {
+                        onFailure.accept(msg.contains("BUSY") ? "la placa está ocupada ejecutando un programa (para"
+                                + " recuperar el control, parar)" : (msg.isEmpty() ? cause.toString() : msg));
                     }
                 } finally {
                     setActionButtonsEnabled(true);
