@@ -2165,6 +2165,13 @@ public final class BpvmClient implements AutoCloseable {
             } else if ("ERROR".equals(type)) {
                 synchronized (pendingLock) { troceados.remove(reqId); }   // una troceada cortada a medias
             }
+            /* V9 #864 — el HELLO, hecho ANTES de despertar a quien lo espera. Al revés, el connect despertaba con el
+             * complete() y miraba isHandshakeDone() antes de que este hilo llegara al countDown(): «handshake con
+             * COM15 no completado» con un HELLO que había contestado (medido el 22-nov: 2 de 30 conexiones con el IDE
+             * de V8.1, en la P4 y en la Pico; y #863, el mismo mensaje con el micro simulado). */
+            if ("HELLO_REPLY".equals(type)) {
+                helloLatch.countDown();
+            }
             CompletableFuture<Map<String, Object>> fut;
             synchronized (pendingLock) { fut = pendingRequests.remove(reqId); }
             if (fut != null) {
@@ -2172,9 +2179,6 @@ public final class BpvmClient implements AutoCloseable {
             } else {
                 // Reply sin request pendiente: probablemente respuesta a un
                 // sendOneShot (fire-and-forget). Silencioso por diseño.
-            }
-            if ("HELLO_REPLY".equals(type)) {
-                helloLatch.countDown();
             }
             return;
         }
