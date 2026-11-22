@@ -169,6 +169,12 @@ public abstract class AbstractBpvmBackend implements Backend {
      * porque no tiene capability DEBUG), respondemos auto-CONTINUE
      * para que el RUN no se quede colgado.
      */
+    /** V9 H2.2 — el EXITED del último RUN (cómo acabó: el código, el estado, lo que tardó y, si falló, dónde), o null
+     *  si aún no ha acabado. Lo lee el comando «ejecutar_placa» para su resultado. */
+    private volatile edu.bpgenvm.vm.debug.ExitedEvent ultimoExited;
+
+    public edu.bpgenvm.vm.debug.ExitedEvent ultimoExited() { return ultimoExited; }
+
     @Override public String run(String path, String arg, Consumer<String> lineSink) throws IOException {
         require();
         final BpvmClient c = this.client;                    // #803: close() lo pone a null desde otro hilo
@@ -193,8 +199,10 @@ public abstract class AbstractBpvmBackend implements Backend {
             }
         });
 
+        ultimoExited = null;
         c.setEventListener(ev -> {
             if (ev instanceof edu.bpgenvm.vm.debug.ExitedEvent) {
+                ultimoExited = (edu.bpgenvm.vm.debug.ExitedEvent) ev;   // V9 H2.2: para el resultado del comando
                 if (lineBuf.length() > 0) {
                     String trailing = lineBuf.toString();
                     lineBuf.setLength(0);

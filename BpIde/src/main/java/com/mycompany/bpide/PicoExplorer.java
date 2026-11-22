@@ -1184,11 +1184,13 @@ public final class PicoExplorer extends JPanel {
         if (!isConnected()) {
             if (outputSink != null) outputSink.accept(
                     "[Explorer] no conectado — pulsa Connect primero");
+            avisaFinDelRun("error: no conectado");   // V9 H2.2: quien espera el fin, también sin empezar
             return;
         }
         if (modFile == null || !modFile.isFile()) {
             if (outputSink != null) outputSink.accept(
                     "[Explorer] fichero no existe: " + modFile);
+            avisaFinDelRun("error: no existe el fichero " + modFile);
             return;
         }
         final String prefix = (appPrefix == null || appPrefix.isEmpty()) ? "/app" : appPrefix;
@@ -1476,7 +1478,17 @@ public final class PicoExplorer extends JPanel {
          * marca se suelta al acabar la tarea, vaya bien o mal. */
         ejecutandoEnLaPlaca = true;
         runAsync(() -> {
-            try { return tarea.run(); } finally { ejecutandoEnLaPlaca = false; }
+            try {
+                return tarea.run();
+            } catch (Exception ex) {
+                // V9 H2.2 — también si falla (la subida, el RUN): quien espera el fin lo sabe. El error lo sigue
+                // pintando runAsync, como siempre.
+                final String msg = ex.getMessage() == null ? ex.toString() : ex.getMessage();
+                SwingUtilities.invokeLater(() -> avisaFinDelRun("error: " + msg));
+                throw ex;
+            } finally {
+                ejecutandoEnLaPlaca = false;
+            }
         }, statusStr -> {
             if ("(debug)".equals(statusStr)) {
                 // Sesión de debug: el device queda PAUSADO esperando comandos de
@@ -1484,14 +1496,34 @@ public final class PicoExplorer extends JPanel {
                 // firmware respondería UNSUPPORTED ("no valido en pausa"). El árbol
                 // de ficheros se refresca al detach/fin de la sesión.
                 status.setText("Debug: sesión iniciada (device pausado)");
+                avisaFinDelRun(statusStr);
                 return;
             }
             if (outputSink != null) {
                 outputSink.accept("[Explorer] VM finished: " + statusStr);
             }
             status.setText("Done: " + statusStr);
+            avisaFinDelRun(statusStr);
             onRefresh();
         });
+    }
+
+    /** V9 H2.2 — quien espera el fin del próximo programa que se lance desde aquí (el comando «ejecutar_placa»): se le
+     *  avisa una vez, con lo que dice el fin («exit N (…)», «(debug)» o «error: …»). */
+    private volatile Consumer<String> alAcabarElRun;
+
+    public void alAcabarElSiguienteRun(Consumer<String> c) { this.alAcabarElRun = c; }
+
+    private void avisaFinDelRun(String status) {
+        Consumer<String> c = alAcabarElRun;
+        alAcabarElRun = null;
+        if (c != null) c.accept(status);
+    }
+
+    /** V9 H2.2 — el EXITED del último programa de la placa (cómo acabó), o null. */
+    public edu.bpgenvm.vm.debug.ExitedEvent ultimoExited() {
+        Backend b = this.backend;
+        return (b instanceof AbstractBpvmBackend) ? ((AbstractBpvmBackend) b).ultimoExited() : null;
     }
 
     /* ── EL ÁRBOL POR COLORES (encargo de Eduardo, 18-ago) ──────────────────

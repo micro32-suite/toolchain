@@ -50,6 +50,8 @@ public final class Comandos {
         private final Function<Map<String, Object>, CompletableFuture<Resultado>> logica;
         /** Desde la ventana, lo que falta, por sus diálogos; null = el usuario lo canceló (no se hace nada). */
         private Supplier<Map<String, Object>> pideALaVentana = HashMap::new;
+        /** El comando ES su diálogo (una configuración, la gestión de la placa…): sólo desde la ventana. */
+        private boolean soloVentana;
 
         private Comando(String id, String texto, Function<Map<String, Object>, CompletableFuture<Resultado>> logica) {
             this.id = id;
@@ -68,10 +70,13 @@ public final class Comandos {
         public Comando parametro(String nombre, String queEs) { parametros.put(nombre, queEs); return this; }
         /** Cómo pide la ventana lo que falta: devuelve los parámetros, o null si el usuario cancela. */
         public Comando pide(Supplier<Map<String, Object>> s) { this.pideALaVentana = s; return this; }
+        /** El comando es su propio diálogo: llamado por su nombre, un resultado que lo dice (no abre nada). */
+        public Comando soloVentana() { this.soloVentana = true; return this; }
 
         public String texto() { return texto; }
         public String textoCorto() { return textoCorto; }
         public String ayuda() { return ayuda; }
+        public boolean esSoloVentana() { return soloVentana; }
         public Map<String, String> parametros() { return Collections.unmodifiableMap(parametros); }
     }
 
@@ -120,6 +125,17 @@ public final class Comandos {
         if (c == null) {
             return CompletableFuture.completedFuture(Resultado.mal("no hay ningún comando '" + id + "'"));
         }
+        if (c.soloVentana) {
+            return CompletableFuture.completedFuture(Resultado.mal("'" + id + "' abre un diálogo de la ventana: sólo se"
+                    + " usa desde la ventana"));
+        }
+        return corre(c, parametros);
+    }
+
+    /** Corre la lógica de un comando en el EDT; el resultado, cuando acabe (lo de {@link #ejecuta}, sin mirar si es
+     *  sólo de la ventana: desde la ventana, lo es siempre). */
+    private CompletableFuture<Resultado> corre(Comando c, Map<String, Object> parametros) {
+        final String id = c.id;
         final Map<String, Object> p = parametros != null ? parametros : Collections.<String, Object>emptyMap();
         CompletableFuture<Resultado> f = new CompletableFuture<>();
         Runnable corre = () -> {
@@ -152,22 +168,36 @@ public final class Comandos {
         if (c == null) throw new IllegalArgumentException("no hay ningún comando '" + id + "'");
         Map<String, Object> p = c.pideALaVentana.get();
         if (p == null) return null;   // cancelado en su diálogo: como antes, no se hace nada
-        CompletableFuture<Resultado> f = ejecuta(id, p);
-        f.thenAccept(r -> {
-            if (r != null && r.tituloDialogo != null) {
-                Runnable aviso = () -> JOptionPane.showMessageDialog(ventana, r.mensaje, r.tituloDialogo, r.tipoDialogo);
-                if (SwingUtilities.isEventDispatchThread()) aviso.run();
-                else SwingUtilities.invokeLater(aviso);
-            }
-        });
+        return desdeLaVentana(id, p);
+    }
+
+    /**
+     * Desde la ventana, con los parámetros ya dichos (un reciente del menú: el fichero que abrir), sin pedir nada:
+     * ejecuta y, si el resultado lo pide, enseña su diálogo. En el EDT.
+     */
+    public CompletableFuture<Resultado> desdeLaVentana(String id, Map<String, Object> parametros) {
+        Comando c = porId.get(id);
+        if (c == null) throw new IllegalArgumentException("no hay ningún comando '" + id + "'");
+        CompletableFuture<Resultado> f = corre(c, parametros);
+        f.thenAccept(this::muestra);
         return f;
+    }
+
+    /** El diálogo que pide un resultado (un aviso), en la ventana; nada si no lo pide. Lo usa también el código de la
+     *  ventana que llama a la lógica sin pasar por un comando (el doble clic del árbol). */
+    public void muestra(Resultado r) {
+        if (r == null || r.tituloDialogo == null) return;
+        Runnable aviso = () -> JOptionPane.showMessageDialog(ventana, r.mensaje, r.tituloDialogo, r.tipoDialogo);
+        if (SwingUtilities.isEventDispatchThread()) aviso.run();
+        else SwingUtilities.invokeLater(aviso);
     }
 
     /** Los nombres, con su texto y sus parámetros (para quien los liste: la IA). */
     public List<String> describe() {
         List<String> out = new ArrayList<>();
         for (Comando c : porId.values()) {
-            out.add(c.id + " — " + c.texto + (c.parametros.isEmpty() ? "" : " " + c.parametros));
+            out.add(c.id + " — " + c.texto + (c.parametros.isEmpty() ? "" : " " + c.parametros)
+                    + (c.soloVentana ? " (sólo desde la ventana)" : ""));
         }
         return out;
     }

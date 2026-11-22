@@ -6,6 +6,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.Action;
 import javax.swing.KeyStroke;
 import javax.swing.SwingUtilities;
@@ -16,7 +17,8 @@ import javax.swing.SwingUtilities;
  * Lo que se mira: un comando llamado por su nombre desde otro hilo corre en el EDT y devuelve su resultado; uno que no
  * existe, o una lógica que revienta, es un resultado «mal», no una excepción; lo largo completa el resultado al acabar;
  * la Action es una y lleva el texto, la ayuda y el atajo del comando; y desde la ventana, un diálogo cancelado no
- * ejecuta nada. Sale con 0 si todo va bien.
+ * ejecuta nada. Y de la segunda tanda: el que es su diálogo sólo se abre desde la ventana, y desde la ventana con los
+ * parámetros ya dichos (un reciente del menú) no se pide nada. Sale con 0 si todo va bien.
  */
 public final class ComandosSmoke {
 
@@ -101,6 +103,40 @@ public final class ComandosSmoke {
 
         // 7. la lista, para quien la pida
         mira(cs.describe().size() == 4 && cs.describe().get(0).startsWith("suma — Suma"), "la lista: " + cs.describe());
+
+        // 8. el que es su diálogo: por su nombre, no se ejecuta (y lo dice); desde la ventana, sí
+        AtomicInteger abierto = new AtomicInteger();
+        cs.registra("dialogo", "Diálogo", q -> {
+            abierto.incrementAndGet();
+            return CompletableFuture.completedFuture(Resultado.bien("hecho"));
+        }).soloVentana();
+        Resultado sv = cs.ejecuta("dialogo", null).get(5, TimeUnit.SECONDS);
+        mira(!sv.ok && sv.mensaje.contains("sólo se usa desde la ventana") && abierto.get() == 0,
+                "sólo desde la ventana, por su nombre no se abre: " + sv);
+        AtomicReference<CompletableFuture<Resultado>> desdeV = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> desdeV.set(cs.desdeLaVentana("dialogo")));
+        Resultado rv = desdeV.get().get(5, TimeUnit.SECONDS);
+        mira(rv.ok && abierto.get() == 1, "y desde la ventana, sí: " + rv);
+        mira(cs.describe().get(4).endsWith("(sólo desde la ventana)"), "la lista lo dice: " + cs.describe().get(4));
+
+        // 9. desde la ventana con los parámetros ya dichos (un reciente): no pide nada, y le llegan
+        AtomicBoolean pidio = new AtomicBoolean(false);
+        cs.registra("conpide", "Con pide", q -> CompletableFuture.completedFuture(
+                Resultado.bien("recibido").con("fichero", q.get("fichero"))))
+          .pide(() -> { pidio.set(true); return new HashMap<>(); });
+        Map<String, Object> dichos = new HashMap<>();
+        dichos.put("fichero", "C:/x/y.bp");
+        AtomicReference<CompletableFuture<Resultado>> desdeR = new AtomicReference<>();
+        SwingUtilities.invokeAndWait(() -> desdeR.set(cs.desdeLaVentana("conpide", dichos)));
+        Resultado rr = desdeR.get().get(5, TimeUnit.SECONDS);
+        mira(rr.ok && "C:/x/y.bp".equals(rr.datos.get("fichero")) && !pidio.get(),
+                "con los parámetros ya dichos, no pide y le llegan: " + rr);
+
+        // 10. muestra: un resultado sin aviso no enseña nada (ni revienta sin ventana)
+        boolean sinAviso = true;
+        try { cs.muestra(Resultado.bien("nada que enseñar")); cs.muestra(null); }
+        catch (RuntimeException e) { sinAviso = false; }
+        mira(sinAviso, "un resultado sin aviso no enseña ningún diálogo");
 
         System.out.println(fallos == 0 ? "ComandosSmoke: TODO BIEN" : "ComandosSmoke: " + fallos + " FALLO(S)");
         System.exit(fallos == 0 ? 0 : 1);

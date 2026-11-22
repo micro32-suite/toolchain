@@ -513,14 +513,13 @@ public class FrmMain extends javax.swing.JFrame
         recentFilesMenu = new javax.swing.JMenu("Recent Files");
         jMenu1.insert(recentFilesMenu, 3);   // New, Load, Save, [Recent], sep, Exit
         rebuildRecentFilesMenu();
+        // El Exit del diseñador, también un comando: fuera su oyente (el de NetBeans), dentro su Action.
+        for (java.awt.event.ActionListener l : jMenuItem3.getActionListeners()) jMenuItem3.removeActionListener(l);
+        jMenuItem3.setAction(comandos.accion("salir"));
 
         // -- Menú Edit: traducir entre BP y JC (V8 #698), a una pestaña nueva sin guardar. --
-        JMenuItem miAJc = new JMenuItem("Traducir a JC");
-        miAJc.addActionListener(e -> onTraducir(true));
-        jMenu2.add(miAJc);
-        JMenuItem miABp = new JMenuItem("Traducir a BP");
-        miABp.addActionListener(e -> onTraducir(false));
-        jMenu2.add(miABp);
+        jMenu2.add(new JMenuItem(comandos.accion("traducir_jc")));
+        jMenu2.add(new JMenuItem(comandos.accion("traducir_bp")));
 
         // -- Menú Project: New Project, Open Project, Close Project. --
         setupProjectMenu();
@@ -529,8 +528,7 @@ public class FrmMain extends javax.swing.JFrame
         JMenuItem miCompile = new JMenuItem(comandos.accion("compilar"));
         jMenu3.add(miCompile);
 
-        JMenuItem miBuild = new JMenuItem("Build Project");   // H3: compila el proyecto + monta el pack (out:pack)
-        miBuild.addActionListener(e -> doBuildProject());
+        JMenuItem miBuild = new JMenuItem(comandos.accion("construir"));   // H3: compila el proyecto + el pack (out:pack)
         jMenu3.add(miBuild);
 
         JMenuItem miRun = new JMenuItem(comandos.accion("ejecutar"));
@@ -541,35 +539,20 @@ public class FrmMain extends javax.swing.JFrame
         JMenuItem miStop = new JMenuItem(comandos.accion("parar"));
         jMenu3.add(miStop);
 
-        JMenuItem miRunOnPico = new JMenuItem("Run on Device");
-        miRunOnPico.addActionListener(e -> doRunOnPico());
-        jMenu3.add(miRunOnPico);
+        jMenu3.add(new JMenuItem(comandos.accion("ejecutar_placa")));
 
         // Ver la ventana del programa en el PC: compila y lanza la VM-C nativa
         // (LVGL/SDL), que abre la GUI en una ventana de escritorio.
-        JMenuItem miRunWin = new JMenuItem("Run Window (VM-C)");
-        miRunWin.addActionListener(e -> doRunWindow());
-        jMenu3.add(miRunWin);
+        jMenu3.add(new JMenuItem(comandos.accion("ejecutar_ventana")));
 
         // H9 — abre FrmBoard (entorno + particiones) sobre la conexión ya abierta.
         jMenu3.addSeparator();
-        JMenuItem miBoard = new JMenuItem("Gestión de placa…");
-        miBoard.addActionListener(e -> openBoardManager());
-        jMenu3.add(miBoard);
-        JMenuItem miEnv = new JMenuItem("Variables de entorno…");
-        miEnv.addActionListener(e -> openEnvDialog());
-        jMenu3.add(miEnv);
-        JMenuItem miDao = new JMenuItem("DAO build");
-        miDao.addActionListener(e -> doDaoBuild());
-        jMenu3.add(miDao);
+        jMenu3.add(new JMenuItem(comandos.accion("gestion_placa")));
+        jMenu3.add(new JMenuItem(comandos.accion("entorno_placa")));
+        jMenu3.add(new JMenuItem(comandos.accion("dao")));
 
         jMenu3.addSeparator();
-        JMenuItem miClear = new JMenuItem("Clear console");
-        miClear.addActionListener(e -> {
-            consolaArea.setText("");
-            errors.clear();
-        });
-        jMenu3.add(miClear);
+        jMenu3.add(new JMenuItem(comandos.accion("limpiar_consola")));
 
         setupDebug();
         setupHelp();
@@ -603,34 +586,34 @@ public class FrmMain extends javax.swing.JFrame
         group(tb, toolButton("abrir"),
                   toolButton("guardar"),
                   toolButton("nuevo"),
-                  toolButton("Open Proj.", "Abrir proyecto",  e -> onOpenProject()));
-
-        /* #395 — el estado inicial: al arrancar no hay proyecto, asi que el
-         * botón nace deshabilitado y diciendo por qué en su tooltip. */
-        actualizarEstadoProyecto();
+                  toolButton("abrir_proyecto"));
 
         tb.add(javax.swing.Box.createHorizontalGlue());
 
         // -- Centro: ejecución.
         group(tb, toolButton("compilar"),
-                  toolButton("Build Proj",    "Construir el proyecto (+ pack si out:pack)", e -> doBuildProject()),
+                  toolButton("construir"),
                   toolButton("ejecutar"),
-                  toolButton("Run Window",    "Ver la ventana en el PC (VM-C nativa)", e -> doRunWindow()),
-                  toolButton("Run on Device", "Ejecutar en placa",   e -> doRunOnPico()),
-                  toolButton("Placa",         "Gestión de placa (particiones + packs)", e -> openBoardManager()),
-                  toolButton("Entorno",       "Variables de entorno de la placa", e -> openEnvDialog()),
-                  btnDaoBuild = toolButton("DAO build", "Generar los DAO del proyecto a partir de las @BD",
-                                           e -> doDaoBuild()),
+                  toolButton("ejecutar_ventana"),
+                  toolButton("ejecutar_placa"),
+                  toolButton("gestion_placa"),
+                  toolButton("entorno_placa"),
+                  btnDaoBuild = toolButton("dao"),
                   toolButton("Debug",         "Depurar",             e -> doDebug()),
                   toolButton("parar"));
+
+        /* #395 — el estado inicial: al arrancar no hay proyecto, asi que el
+         * botón nace deshabilitado y diciendo por qué en su tooltip. (V9 H2.2: aquí, ya creado el botón; antes se
+         * llamaba antes de crearlo y el botón nacía habilitado.) */
+        actualizarEstadoProyecto();
 
         tb.add(javax.swing.Box.createHorizontalGlue());
 
         // -- Derecha: edición (sobre la selección).
-        group(tb, toolButton("Indent",    "Indentar selección",     e -> editIndentSelection(true)),
-                  toolButton("Dedent",    "Des-indentar selección", e -> editIndentSelection(false)),
-                  toolButton("Comment",   "Comentar selección",     e -> editCommentSelection(true)),
-                  toolButton("Uncomment", "Descomentar selección",  e -> editCommentSelection(false)));
+        group(tb, toolButton("indentar"),
+                  toolButton("desindentar"),
+                  toolButton("comentar"),
+                  toolButton("descomentar"));
 
         getContentPane().add(tb, java.awt.BorderLayout.PAGE_START);
     }
@@ -701,8 +684,9 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     /** Indenta (add=true) o des-indenta (add=false) las líneas que abarca la
-     *  selección del editor activo (o la línea del cursor si no hay selección). */
-    private void editIndentSelection(boolean add) {
+     *  selección del editor activo (o la línea del cursor si no hay selección).
+     *  V9 H2.2: los comandos «indentar» y «desindentar»; el resultado, las líneas. */
+    private Resultado editIndentSelection(boolean add) {
         final String UNIT = "    ";   // 4 espacios
         javax.swing.text.Document doc = editorArea.getDocument();
         javax.swing.text.Element root = doc.getDefaultRootElement();
@@ -726,12 +710,15 @@ public class FrmMain extends javax.swing.JFrame
             }
         } catch (javax.swing.text.BadLocationException ex) { /* no-op */ }
         editorArea.requestFocusInWindow();
+        return Resultado.bien((add ? "indentadas" : "des-indentadas") + " las líneas " + (first + 1) + " a " + (last + 1))
+                .con("desde", first + 1).con("hasta", last + 1);
     }
 
     /** Comenta (comment=true) o descomenta (comment=false) con `//` las líneas que
      *  abarca la selección. Comentar inserta `// ` ante el primer no-blanco (respeta
-     *  la indentación); descomentar quita el primer `//` y un espacio si lo sigue. */
-    private void editCommentSelection(boolean comment) {
+     *  la indentación); descomentar quita el primer `//` y un espacio si lo sigue.
+     *  V9 H2.2: los comandos «comentar» y «descomentar»; el resultado, las líneas. */
+    private Resultado editCommentSelection(boolean comment) {
         javax.swing.text.Document doc = editorArea.getDocument();
         javax.swing.text.Element root = doc.getDefaultRootElement();
         int selStart = editorArea.getSelectionStart();
@@ -755,6 +742,8 @@ public class FrmMain extends javax.swing.JFrame
             }
         } catch (javax.swing.text.BadLocationException ex) { /* no-op */ }
         editorArea.requestFocusInWindow();
+        return Resultado.bien((comment ? "comentadas" : "descomentadas") + " las líneas " + (first + 1) + " a " + (last + 1))
+                .con("desde", first + 1).con("hasta", last + 1);
     }
 
     // ================================================================
@@ -885,20 +874,13 @@ public class FrmMain extends javax.swing.JFrame
 
     private void setupProjectMenu() {
         JMenu menuProject = new JMenu("Project");
-        JMenuItem miNew   = new JMenuItem("New Project...");
-        JMenuItem miOpen  = new JMenuItem("Open Project...");
-        JMenuItem miClose = new JMenuItem("Close Project");
-        JMenuItem miAddRes = new JMenuItem("Add File to Resources...");   // H12 (#260)
-        JMenuItem miEndpoint = new JMenuItem("VM Endpoint...");
-        JMenuItem miAot = new JMenuItem("AOT (toolchain)...");      // H12 Bloque B
-        JMenuItem miProps = new JMenuItem("Project Properties...");  // H3: out:pack + AOT
-        miNew.addActionListener(e -> onNewProject());
-        miOpen.addActionListener(e -> onOpenProject());
-        miClose.addActionListener(e -> onCloseProject());
-        miAddRes.addActionListener(e -> onAddFileToResources());
-        miEndpoint.addActionListener(e -> onConfigureVmEndpoint());
-        miAot.addActionListener(e -> onConfigureAot());
-        miProps.addActionListener(e -> onProjectProperties());
+        JMenuItem miNew   = new JMenuItem(comandos.accion("nuevo_proyecto"));
+        JMenuItem miOpen  = new JMenuItem(comandos.accion("abrir_proyecto"));
+        JMenuItem miClose = new JMenuItem(comandos.accion("cerrar_proyecto"));
+        JMenuItem miAddRes = new JMenuItem(comandos.accion("anadir_recursos"));   // H12 (#260)
+        JMenuItem miEndpoint = new JMenuItem(comandos.accion("endpoint_vm"));
+        JMenuItem miAot = new JMenuItem(comandos.accion("aot"));                  // H12 Bloque B
+        JMenuItem miProps = new JMenuItem(comandos.accion("propiedades_proyecto"));  // H3: out:pack + AOT
         menuProject.add(miNew);
         menuProject.add(miOpen);
         recentProjectsMenu = new javax.swing.JMenu("Recent Projects");
@@ -935,8 +917,10 @@ public class FrmMain extends javax.swing.JFrame
             JMenuItem item = new JMenuItem(i + "  " + path.getFileName());
             item.setToolTipText(p);
             item.addActionListener(e -> {
-                if (isProject) loadProjectFrom(path);
-                else           openFileInEditor(path);
+                // V9 H2.2 — un reciente es «abrir» (o «abrir_proyecto») con su ruta
+                Map<String, Object> params = new HashMap<>();
+                params.put(isProject ? "proyecto" : "fichero", path.toString());
+                comandos.desdeLaVentana(isProject ? "abrir_proyecto" : "abrir", params);
             });
             menu.add(item);
             i++;
@@ -1146,17 +1130,19 @@ public class FrmMain extends javax.swing.JFrame
 
     /** H3/IDE — Build Project: construye el proyecto abierto (compila todo +
      *  monta el pack si out:pack), por el MISMO camino que la CLI (buildProject).
-     *  Acción explícita de build de proyecto (sin ejecutar). */
-    private void doBuildProject() {
+     *  Acción explícita de build de proyecto (sin ejecutar).
+     *  V9 H2.2 — el comando «construir». El resultado, al acabar: los errores y la salida. */
+    private CompletableFuture<Resultado> construir() {
         if (currentProject == null) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No hay proyecto abierto. Abre o crea un proyecto (.bpbuild).",
-                    "Build Project", javax.swing.JOptionPane.INFORMATION_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Build Project",
+                    "No hay proyecto abierto. Abre o crea un proyecto (.bpbuild).", JOptionPane.INFORMATION_MESSAGE));
         }
         consolaArea.setText("");
         errors.clear();
         final basicplus.frontend.BpBuild proj = currentProject;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        final StringBuilder salida = new StringBuilder();
+        final java.util.concurrent.atomic.AtomicBoolean bien = new java.util.concurrent.atomic.AtomicBoolean(false);
         new SwingWorker<Void, String>() {
             @Override protected Void doInBackground() {
                 publish("== construyendo proyecto " + proj.main
@@ -1170,43 +1156,73 @@ public class FrmMain extends javax.swing.JFrame
                         return false;
                     }
                 }, this::publish);
+                bien.set(ok);
                 publish(ok ? "== build OK ==\n" : "== build falló ==\n");
                 return null;
             }
             @Override protected void process(List<String> chunks) {
-                for (String s : chunks) { appendConsola(s); parseAndAddError(s); }
+                for (String s : chunks) { appendConsola(s); parseAndAddError(s); salida.append(s); }
             }
-            @Override protected void done() { refreshProjectTree(); }   // H3: que el .pack aparezca en Output
+            @Override protected void done() {
+                refreshProjectTree();   // H3: que el .pack aparezca en Output
+                Resultado r = bien.get() ? Resultado.bien("construir: build OK") : Resultado.mal("construir: el build falló");
+                fin.complete(r.con("errores", erroresEnDatos()).con("salida", salida.toString()));
+            }
         }.execute();
+        return fin;
     }
 
-    /** Pregunta al usuario: directorio del proyecto + nombre. Crea estructura:
-     *  <projectDir>/<name>.bpbuild + src/<name>.bp + out/. */
-    private void onNewProject() {
+    /** V9 H2.2 — los errores de la tabla, en datos (para los resultados). */
+    private List<Map<String, Object>> erroresEnDatos() {
+        List<Map<String, Object>> errs = new ArrayList<>();
+        for (CompileError ce : errors.snapshot()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("fichero", ce.file);
+            m.put("linea", ce.line);
+            m.put("columna", ce.column);
+            m.put("tipo", ce.kind);
+            m.put("categoria", ce.category);
+            m.put("mensaje", ce.message);
+            errs.add(m);
+        }
+        return errs;
+    }
+
+    /** Desde la ventana, «nuevo_proyecto» pide la carpeta y el nombre, como siempre; null si se cancela uno de los dos. */
+    private Map<String, Object> pideNuevoProyecto() {
         javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
         fc.setDialogTitle("Selecciona el directorio donde crear el proyecto");
         fc.setFileSelectionMode(javax.swing.JFileChooser.DIRECTORIES_ONLY);
-        if (fc.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        java.io.File dir = fc.getSelectedFile();
-
+        if (fc.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) return null;
         String name = javax.swing.JOptionPane.showInputDialog(this,
                 "Nombre del proyecto (será el módulo main):",
                 "Nuevo proyecto", javax.swing.JOptionPane.PLAIN_MESSAGE);
-        if (name == null) return;
-        name = name.trim();
+        if (name == null) return null;
+        Map<String, Object> p = new HashMap<>();
+        p.put("carpeta", fc.getSelectedFile().getAbsolutePath());
+        p.put("nombre", name);
+        return p;
+    }
+
+    /** V9 H2.2 — «nuevo_proyecto»: en la carpeta, <nombre>.bpbuild, src/<nombre>.bp, out/ y resources/; lo abre y abre
+     *  su main (lo de Project → New Project…). Los errores, con el diálogo de antes. */
+    private CompletableFuture<Resultado> nuevoProyecto(Map<String, Object> p) {
+        Object carpeta = p.get("carpeta");
+        Object nombre = p.get("nombre");
+        if (carpeta == null || nombre == null) {
+            return listo(Resultado.mal("nuevo_proyecto: faltan los parámetros 'carpeta' y 'nombre'"));
+        }
+        java.io.File dir = new java.io.File(carpeta.toString()).getAbsoluteFile();
+        String name = nombre.toString().trim();
         if (name.isEmpty() || !isValidModuleName(name)) {
-            javax.swing.JOptionPane.showMessageDialog(this,
+            return listo(Resultado.aviso("Error",
                     "Nombre inválido: usa letras, dígitos y guiones bajos (no empieza por dígito).",
-                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
-            return;
+                    JOptionPane.ERROR_MESSAGE));
         }
         java.io.File srcDir = new java.io.File(dir, "src");
         java.io.File outDir = new java.io.File(dir, "out");
         if (!srcDir.exists() && !srcDir.mkdirs()) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No se pudo crear " + srcDir,
-                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Error", "No se pudo crear " + srcDir, JOptionPane.ERROR_MESSAGE));
         }
         outDir.mkdirs();
         // H12 (#260) — resources/: ficheros de datos (fuentes, imágenes,
@@ -1222,10 +1238,8 @@ public class FrmMain extends javax.swing.JFrame
             pw.println("  end main");
             pw.println("end " + name);
         } catch (java.io.IOException ex) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No se pudo crear " + mainBp + ": " + ex.getMessage(),
-                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Error", "No se pudo crear " + mainBp + ": " + ex.getMessage(),
+                    JOptionPane.ERROR_MESSAGE));
         }
 
         // .bpbuild
@@ -1243,27 +1257,43 @@ public class FrmMain extends javax.swing.JFrame
             pw.println("  \"aot\":          { \"enabled\": false, \"target\": \"arm\" }");
             pw.println("}");
         } catch (java.io.IOException ex) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No se pudo crear " + buildFile + ": " + ex.getMessage(),
-                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Error", "No se pudo crear " + buildFile + ": " + ex.getMessage(),
+                    JOptionPane.ERROR_MESSAGE));
         }
 
-        loadProjectFrom(buildFile.toPath());
-        openFileInEditor(mainBp.toPath());
+        Resultado cargado = cargaProyecto(buildFile.toPath());
+        if (!cargado.ok) return listo(cargado);
+        Resultado abierto = abreEnElEditor(mainBp.toPath());
+        if (!abierto.ok) return listo(abierto);
+        return listo(Resultado.bien("proyecto nuevo: " + buildFile).con("proyecto", buildFile.toString())
+                .con("main", mainBp.toString()));
     }
 
-    /** Abre un FileChooser filtrando por .bpbuild y lo carga. */
-    private void onOpenProject() {
+    /** Desde la ventana, «abrir_proyecto» pide el .bpbuild con el selector, como siempre; null si se cancela. */
+    private Map<String, Object> pideProyectoQueAbrir() {
         javax.swing.JFileChooser fc = new javax.swing.JFileChooser();
         fc.setDialogTitle("Abrir proyecto (.bpbuild)");
         fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Proyecto BP", "bpbuild"));
-        if (fc.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) return;
-        loadProjectFrom(fc.getSelectedFile().toPath());
+        if (fc.showOpenDialog(this) != javax.swing.JFileChooser.APPROVE_OPTION) return null;
+        Map<String, Object> p = new HashMap<>();
+        p.put("proyecto", fc.getSelectedFile().getAbsolutePath());
+        return p;
     }
 
-    /** Vuelve al modo "fichero suelto": vacía el árbol y olvida currentProject. */
-    private void onCloseProject() {
+    /** V9 H2.2 — «abrir_proyecto»: carga el .bpbuild (lo de Project → Open Project… sin el selector). */
+    private CompletableFuture<Resultado> abrirProyecto(Map<String, Object> p) {
+        Object f = p.get("proyecto");
+        if (f == null) return listo(Resultado.mal("abrir_proyecto: falta el parámetro 'proyecto' (el .bpbuild)"));
+        Path ruta = java.nio.file.Paths.get(f.toString()).toAbsolutePath();
+        if (!Files.isRegularFile(ruta)) {   // un reciente que ya no está: el aviso de siempre
+            return listo(Resultado.aviso("Error", "Error cargando proyecto:\nno existe " + ruta,
+                    JOptionPane.ERROR_MESSAGE));
+        }
+        return listo(cargaProyecto(ruta));
+    }
+
+    /** «cerrar_proyecto»: vuelve al modo "fichero suelto": vacía el árbol y olvida currentProject. */
+    private Resultado cerrarProyecto() {
         currentProject = null;
         currentProjectFile = null;
         actualizarEstadoProyecto();         // #395
@@ -1271,6 +1301,7 @@ public class FrmMain extends javax.swing.JFrame
                 new javax.swing.tree.DefaultMutableTreeNode("(sin proyecto)");
         projectTreeModel.setRoot(root);
         setTitle(titulo("Untitled"));
+        return Resultado.bien("proyecto cerrado");
     }
 
     private static boolean isValidModuleName(String s) {
@@ -1283,9 +1314,9 @@ public class FrmMain extends javax.swing.JFrame
         return true;
     }
 
-    /** Carga el .bpbuild en disco y rellena el árbol. Si hay error, muestra
-     *  diálogo y se queda en el estado anterior. */
-    private void loadProjectFrom(java.nio.file.Path bpbuild) {
+    /** Carga el .bpbuild en disco y rellena el árbol. Si hay error, se queda en el estado anterior.
+     *  V9 H2.2 — sin diálogos: el resultado dice si cargó, y si no, el aviso de siempre. */
+    private Resultado cargaProyecto(java.nio.file.Path bpbuild) {
         try {
             basicplus.frontend.BpBuild proj = basicplus.frontend.BpBuild.load(bpbuild);
             this.currentProject     = proj;
@@ -1298,10 +1329,10 @@ public class FrmMain extends javax.swing.JFrame
             IdePrefs.pushRecent(prP.recentProjects, bpbuild.toAbsolutePath().toString(), IdePrefs.MAX_RECENT);
             prP.save();
             rebuildRecentProjectsMenu();
+            return Resultado.bien("proyecto abierto: " + bpbuild).con("proyecto", bpbuild.toString())
+                    .con("main", proj.main);
         } catch (java.io.IOException ex) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "Error cargando proyecto:\n" + ex.getMessage(),
-                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+            return Resultado.aviso("Error", "Error cargando proyecto:\n" + ex.getMessage(), JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -1460,17 +1491,29 @@ public class FrmMain extends javax.swing.JFrame
                 + ":\nel proyecto no sabe cuál compilar. Quita uno de los dos.";
     }
 
-    /** V8 #698 — Edit → Traducir a JC / a BP: guarda el fichero activo y abre su traducción en una pestaña nueva, sin
-     *  fichero (Eduardo, 18-oct). Lo que no se traduce lo dice la consola, con su motivo. Los comentarios no viajan:
-     *  el lexer de los dos lenguajes los tira. */
-    private void onTraducir(boolean aJc) {
+    /* V8 #698 — Edit → Traducir a JC / a BP: guarda el fichero activo y abre su traducción en una pestaña nueva, sin
+     * fichero (Eduardo, 18-oct). Lo que no se traduce lo dice la consola, con su motivo. Los comentarios no viajan:
+     * el lexer de los dos lenguajes los tira. V9 H2.2: los comandos «traducir_jc» y «traducir_bp» (abajo). */
+
+    /** Desde la ventana, traducir pide lo que «guardar» (un nombre, si la pestaña aún no tiene fichero), salvo con el
+     *  editor vacío: entonces, nada, y el resultado lo dice, como antes. */
+    private Map<String, Object> pideParaTraducir() {
+        if (editorArea.getText().isEmpty()) return new HashMap<>();
+        return pideNombreSiHaceFalta();
+    }
+
+    /** V9 H2.2 — «traducir_jc» y «traducir_bp»: lo de Edit → Traducir, como comando. El resultado lleva la traducción
+     *  (`texto`), o por qué no se traduce. */
+    private CompletableFuture<Resultado> traducir(boolean aJc, Map<String, Object> p) {
+        final String que = aJc ? "traducir_jc" : "traducir_bp";
         if (editorArea.getText().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Editor vacío.", "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Aviso", "Editor vacío.", JOptionPane.INFORMATION_MESSAGE));
         }
-        onSave();
-        if (currentFile == null) return;
+        Resultado guardado = guardarYa(p);
+        if (!guardado.ok) return listo(guardado);
+        if (currentFile == null) return listo(Resultado.mal(que + ": la pestaña no tiene fichero"));
         final Path fuente = currentFile;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         appendConsola("== traduciendo " + fuente.getFileName() + " a " + (aJc ? "JC" : "BP") + " ==\n");
         new SwingWorker<basicplus.frontend.Traductor.Resultado, Void>() {
             @Override
@@ -1485,16 +1528,21 @@ public class FrmMain extends javax.swing.JFrame
                     r = get();
                 } catch (Exception ex) {
                     appendConsola("== la traducción falló: " + ex + " ==\n");
+                    fin.complete(Resultado.mal(que + ": la traducción falló: " + ex));
                     return;
                 }
                 if (r.texto == null) {
                     appendConsola("== no se traduce: " + r.error + " ==\n");
+                    fin.complete(Resultado.mal(que + ": no se traduce: " + r.error));
                     return;
                 }
                 abrirTraduccion(r.texto, aJc, fuente);
                 appendConsola("== traducido, en una pestaña nueva sin guardar (los comentarios no viajan) ==\n");
+                fin.complete(Resultado.bien(que + ": traducido, en una pestaña nueva sin guardar")
+                        .con("fuente", fuente.toString()).con("texto", r.texto));
             }
         }.execute();
+        return fin;
     }
 
     /** La traducción, en una pestaña nueva sin fichero, con el coloreado de su lenguaje: al guardarla, la extensión
@@ -1620,13 +1668,19 @@ public class FrmMain extends javax.swing.JFrame
      *   3. En otro caso → crea un tab nuevo con su propio JTextPane.
      */
     private void openFileInEditor(java.nio.file.Path file) {
+        comandos.muestra(abreEnElEditor(file));   // V9 H2.2: lo mismo, y el diálogo si falla
+    }
+
+    /** V9 H2.2 — abre el fichero en una pestaña (o va a la suya, si ya está abierto), sin diálogos: el resultado dice
+     *  si se abrió, y si no, el aviso de siempre. */
+    private Resultado abreEnElEditor(java.nio.file.Path file) {
         try {
             // 1) ¿ya abierto?
             for (java.util.Map.Entry<java.awt.Component, OpenFile> e : openFiles.entrySet()) {
                 if (file.equals(e.getValue().file)) {
                     jTabbedPane1.setSelectedComponent(e.getKey());
                     refreshActiveTab();
-                    return;
+                    return Resultado.bien("ya estaba abierto: " + file).con("fichero", file.toString());
                 }
             }
             String content = new String(java.nio.file.Files.readAllBytes(file),
@@ -1672,10 +1726,10 @@ public class FrmMain extends javax.swing.JFrame
             IdePrefs.pushRecent(prF.recentFiles, file.toAbsolutePath().toString(), IdePrefs.MAX_RECENT);
             prF.save();
             rebuildRecentFilesMenu();
+            return Resultado.bien("abierto " + file).con("fichero", file.toString());
         } catch (java.io.IOException ex) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No se pudo abrir " + file + ": " + ex.getMessage(),
-                    "Error", javax.swing.JOptionPane.ERROR_MESSAGE);
+            return Resultado.aviso("Error", "No se pudo abrir " + file + ": " + ex.getMessage(),
+                    JOptionPane.ERROR_MESSAGE);
         }
     }
 
@@ -1715,7 +1769,7 @@ public class FrmMain extends javax.swing.JFrame
      */
     private void setupHelp() {
         JMenu menuHelp = new JMenu("Help");
-        JMenuItem miDocs = mi("Documentación", KeyEvent.VK_F1, 0, e -> showManual());
+        JMenuItem miDocs = new JMenuItem(comandos.accion("documentacion"));   // F1, el atajo del comando
         menuHelp.add(miDocs);
         jMenuBar1.add(menuHelp);
     }
@@ -2192,14 +2246,12 @@ public class FrmMain extends javax.swing.JFrame
         prefs.save();
     }
 
-    /**
+    /*
      * File → Load: pide un .bp, lo abre en un tab (nuevo o reciclando
      * el "(sin abrir)" inicial si está vacío). Arranca el chooser en la
      * última carpeta usada para que el usuario no tenga que navegar.
+     * V9 H2.2: es el comando «abrir» (pideFicheroQueAbrir y abrir).
      */
-    private void onLoad() {
-        comandos.desdeLaVentana("abrir");   // V9 H2.2: el comando
-    }
 
     // ================================================================
     // V9 H2.2 (22-nov) — LOS COMANDOS (Comandos). Idea de Eduardo: «transformar los eventos de los botones a comandos y
@@ -2240,6 +2292,80 @@ public class FrmMain extends javax.swing.JFrame
         comandos.registra("parar", "Stop", p -> listo(parar()))
                 .ayuda("Parar (Ctrl+F2)")
                 .atajo(KeyStroke.getKeyStroke("ctrl F2"));
+
+        // -- La segunda tanda: el proyecto, construir, en la placa, con ventana, los DAO, traducir y la consola.
+        comandos.registra("nuevo_proyecto", "New Project...", this::nuevoProyecto)
+                .parametro("carpeta", "la carpeta donde crearlo")
+                .parametro("nombre", "su nombre (el del módulo main)")
+                .pide(this::pideNuevoProyecto);
+        comandos.registra("abrir_proyecto", "Open Project...", this::abrirProyecto)
+                .corto("Open Proj.")
+                .ayuda("Abrir proyecto")
+                .parametro("proyecto", "la ruta del .bpbuild")
+                .pide(this::pideProyectoQueAbrir);
+        comandos.registra("cerrar_proyecto", "Close Project", p -> listo(cerrarProyecto()));
+        comandos.registra("anadir_recursos", "Add File to Resources...", this::anadirRecursos)
+                .parametro("ficheros", "las rutas de los ficheros que copiar a resources/ (una lista, o una)")
+                .pide(this::pideRecursos);
+        comandos.registra("construir", "Build Project", p -> construir())
+                .corto("Build Proj")
+                .ayuda("Construir el proyecto (+ pack si out:pack)");
+        comandos.registra("ejecutar_placa", "Run on Device", this::ejecutarEnLaPlaca)
+                .ayuda("Ejecutar en placa")
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaLaPlaca);
+        comandos.registra("ejecutar_ventana", "Run Window (VM-C)", this::ejecutarEnVentana)
+                .corto("Run Window")
+                .ayuda("Ver la ventana en el PC (VM-C nativa)")
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaCompilar);
+        comandos.registra("dao", "DAO build", p -> listo(daoBuild()))
+                .ayuda("Generar los DAO del proyecto a partir de las @BD");
+        comandos.registra("traducir_jc", "Traducir a JC", p -> traducir(true, p))
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaTraducir);
+        comandos.registra("traducir_bp", "Traducir a BP", p -> traducir(false, p))
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaTraducir);
+        comandos.registra("limpiar_consola", "Clear console", p -> {
+            consolaArea.setText("");
+            errors.clear();
+            return listo(Resultado.bien("consola limpia"));
+        });
+
+        // -- La edición, sobre las líneas de la selección del editor activo (o la del cursor).
+        comandos.registra("indentar", "Indent", p -> listo(editIndentSelection(true)))
+                .ayuda("Indentar selección");
+        comandos.registra("desindentar", "Dedent", p -> listo(editIndentSelection(false)))
+                .ayuda("Des-indentar selección");
+        comandos.registra("comentar", "Comment", p -> listo(editCommentSelection(true)))
+                .ayuda("Comentar selección");
+        comandos.registra("descomentar", "Uncomment", p -> listo(editCommentSelection(false)))
+                .ayuda("Descomentar selección");
+
+        // -- Los que son su diálogo (una configuración, la gestión de la placa, la ayuda, salir): sólo desde la ventana.
+        comandos.registra("propiedades_proyecto", "Project Properties...",
+                p -> enLaVentana(this::onProjectProperties)).soloVentana();
+        comandos.registra("endpoint_vm", "VM Endpoint...", p -> enLaVentana(this::onConfigureVmEndpoint)).soloVentana();
+        comandos.registra("aot", "AOT (toolchain)...", p -> enLaVentana(this::onConfigureAot)).soloVentana();
+        comandos.registra("gestion_placa", "Gestión de placa…", p -> enLaVentana(this::openBoardManager))
+                .corto("Placa")
+                .ayuda("Gestión de placa (particiones + packs)")
+                .soloVentana();
+        comandos.registra("entorno_placa", "Variables de entorno…", p -> enLaVentana(this::openEnvDialog))
+                .corto("Entorno")
+                .ayuda("Variables de entorno de la placa")
+                .soloVentana();
+        comandos.registra("documentacion", "Documentación", p -> enLaVentana(this::showManual))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0))
+                .soloVentana();
+        comandos.registra("salir", "Exit", p -> enLaVentana(() -> jMenuItem3ActionPerformed(null))).soloVentana();
+    }
+
+    /** La lógica de un comando que es su diálogo: lo abre (modal, en el EDT) y, al cerrarlo, «hecho». */
+    private static CompletableFuture<Resultado> enLaVentana(Runnable dialogo) {
+        dialogo.run();
+        return listo(Resultado.bien("hecho"));
     }
 
     /** «abrir»: abre el fichero en una pestaña (lo de File → Load sin el selector). */
@@ -2247,10 +2373,12 @@ public class FrmMain extends javax.swing.JFrame
         Object f = p.get("fichero");
         if (f == null) return listo(Resultado.mal("abrir: falta el parámetro 'fichero'"));
         Path ruta = java.nio.file.Paths.get(f.toString()).toAbsolutePath();
-        if (!Files.isRegularFile(ruta)) return listo(Resultado.mal("abrir: no existe el fichero " + ruta));
+        if (!Files.isRegularFile(ruta)) {   // un reciente que ya no está: el aviso de siempre
+            return listo(Resultado.aviso("Error", "No se pudo abrir " + ruta + ": no existe el fichero",
+                    JOptionPane.ERROR_MESSAGE));
+        }
         if (ruta.getParent() != null) rememberLastDir(ruta.getParent().toFile());
-        openFileInEditor(ruta);
-        return listo(Resultado.bien("abierto " + ruta).con("fichero", ruta.toString()));
+        return listo(abreEnElEditor(ruta));
     }
 
     /** Desde la ventana, «abrir» pide el fichero con el selector, como siempre; null si se cancela. */
@@ -2284,6 +2412,40 @@ public class FrmMain extends javax.swing.JFrame
     private Map<String, Object> pideParaCompilar() {
         if (editorArea.getText().isEmpty() || motivoMainDosVeces() != null) return new HashMap<>();
         return pideNombreSiHaceFalta();
+    }
+
+    /** Desde la ventana, ejecutar en la placa pide lo mismo, y tampoco pide nombre si no hay placa conectada. */
+    private Map<String, Object> pideParaLaPlaca() {
+        if (picoExplorer == null || !picoExplorer.isConnected()) return new HashMap<>();
+        return pideParaCompilar();
+    }
+
+    /**
+     * V9 H2.2 — lo que miran compilar y ejecutar (en el PC, con ventana y en la placa) antes de empezar, en el orden de
+     * siempre: el editor vacío, el main dos veces, la placa conectada (si va a la placa), guardar, y un programa a la vez
+     * (si se ejecuta; y entonces lo marca). null si se puede; si no, el resultado, con el diálogo de antes.
+     */
+    private Resultado antesDeCompilar(String que, Map<String, Object> p, boolean aLaPlaca, boolean ejecuta) {
+        if (editorArea.getText().isEmpty()) {
+            return Resultado.aviso("Aviso", "Editor vacío. Carga o escribe un fichero primero.",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+        String dos = motivoMainDosVeces();   // V8 #698
+        if (dos != null) return Resultado.aviso("Proyecto", dos, JOptionPane.WARNING_MESSAGE);
+        if (aLaPlaca && (picoExplorer == null || !picoExplorer.isConnected())) {
+            return Resultado.aviso("Placa no conectada",
+                    "Conecta primero la placa desde el panel inferior\n(ventana inferior izquierda → Connect).",
+                    JOptionPane.WARNING_MESSAGE);
+        }
+        Resultado guardado = guardarYa(p);
+        if (!guardado.ok) return guardado;
+        if (currentFile == null) return Resultado.mal(que + ": la pestaña no tiene fichero");
+        if (ejecuta && !marcaUnaEjecucion()) {   // V8 #822: un programa a la vez (compilar, sí)
+            return Resultado.aviso("Un programa a la vez",
+                    "Ya hay un programa en marcha.\nPáralo con Stop antes de ejecutar otro.",
+                    JOptionPane.INFORMATION_MESSAGE);
+        }
+        return null;
     }
 
     /** «nuevo»: una pestaña nueva sin fichero (lo de File → New). */
@@ -2335,41 +2497,63 @@ public class FrmMain extends javax.swing.JFrame
         return Resultado.bien("guardado " + of.file).con("fichero", of.file.toString());
     }
 
-    /**
+    /*
      * H12 (#260) — Project → Add File to Resources...: copia ficheros
      * existentes (multi-selección, cualquier tipo: fuentes, imágenes,
      * tablas...) a <projectDir>/resources/. Crea la carpeta si falta y
      * refresca el árbol. Sobreescribe si ya existía uno con ese nombre.
+     * V9 H2.2: es el comando «anadir_recursos» (pideRecursos y anadirRecursos).
      */
-    private void onAddFileToResources() {
-        if (currentProjectFile == null) {
-            JOptionPane.showMessageDialog(this,
-                    "Abre un proyecto primero (Project → Open Project...).",
-                    "Sin proyecto", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
+
+    /** Desde la ventana, «anadir_recursos» pide los ficheros con el selector (varios), como siempre; sin proyecto, nada
+     *  (el resultado lo dice); null si se cancela. */
+    private Map<String, Object> pideRecursos() {
+        Map<String, Object> p = new HashMap<>();
+        if (currentProjectFile == null) return p;
         JFileChooser fc = new JFileChooser();
         fc.setDialogTitle("Ficheros a copiar a resources/");
         fc.setMultiSelectionEnabled(true);
         File initial = initialChooserDir();
         if (initial != null) fc.setCurrentDirectory(initial);
-        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return null;
+        List<String> ficheros = new ArrayList<>();
+        for (File f : fc.getSelectedFiles()) ficheros.add(f.getAbsolutePath());
+        p.put("ficheros", ficheros);
+        return p;
+    }
+
+    /** V9 H2.2 — «anadir_recursos»: copia los ficheros a <proyecto>/resources/ (lo de Project → Add File to
+     *  Resources…). `ficheros`: una lista de rutas, o una sola. */
+    private CompletableFuture<Resultado> anadirRecursos(Map<String, Object> p) {
+        if (currentProjectFile == null) {
+            return listo(Resultado.aviso("Sin proyecto", "Abre un proyecto primero (Project → Open Project...).",
+                    JOptionPane.WARNING_MESSAGE));
+        }
+        Object fs = p.get("ficheros");
+        List<File> lista = new ArrayList<>();
+        if (fs instanceof java.util.Collection) {
+            for (Object o : (java.util.Collection<?>) fs) lista.add(new File(String.valueOf(o)));
+        } else if (fs != null) {
+            lista.add(new File(fs.toString()));
+        }
+        if (lista.isEmpty()) return listo(Resultado.mal("anadir_recursos: falta el parámetro 'ficheros'"));
         java.nio.file.Path rdir = currentProjectFile.getParent().resolve("resources");
+        List<String> copiados = new ArrayList<>();
         try {
             java.nio.file.Files.createDirectories(rdir);
-            for (File f : fc.getSelectedFiles()) {
+            for (File f : lista) {
                 java.nio.file.Files.copy(f.toPath(), rdir.resolve(f.getName()),
                         java.nio.file.StandardCopyOption.REPLACE_EXISTING);
                 appendConsola("[resources] añadido " + f.getName() + "\n");
+                copiados.add(f.getName());
             }
-            rememberLastDir(fc.getSelectedFiles().length > 0
-                    ? fc.getSelectedFiles()[0].getParentFile() : null);
+            rememberLastDir(lista.get(0).getParentFile());
             refreshProjectTree();
         } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this,
-                    "No se pudo copiar a resources/: " + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
+            return listo(Resultado.aviso("Error", "No se pudo copiar a resources/: " + ex.getMessage(),
+                    JOptionPane.ERROR_MESSAGE));
         }
+        return listo(Resultado.bien("añadidos a resources/: " + copiados.size()).con("ficheros", copiados));
     }
 
     /**
@@ -2418,15 +2602,13 @@ public class FrmMain extends javax.swing.JFrame
         return out;
     }
 
-    /**
+    /*
      * H12 (#259) — File → New: tab nuevo con buffer vacío y sin Path
      * asociado. onSave ya cubre el caso file == null pidiendo destino con
      * el chooser (Save As) — el mismo estado que el tab "(sin abrir)"
      * inicial, así que el resto del IDE no necesita cambios.
+     * V9 H2.2: es el comando «nuevo» (nuevoFichero).
      */
-    private void onNewFile() {
-        comandos.desdeLaVentana("nuevo");   // V9 H2.2: el comando
-    }
 
     /**
      * File → Save: escribe al fichero del tab activo. Si el tab no tiene
@@ -2458,20 +2640,21 @@ public class FrmMain extends javax.swing.JFrame
      * prepara el outDir como un "workdir": stdlib *.mod copiada al lado,
      * resources/ copiados también al lado (el .win va TAL CUAL: desde #324 la
      * VM resuelve los handlers por nombre en carga, así que no hay horneado).
+     *
+     * V9 H2.2 — el comando «ejecutar_ventana». El resultado, al cerrar la ventana: los errores de la compilación, la
+     * salida de la consola y el código de salida de la VM-C.
      */
-    private void doRunWindow() {
-        if (editorArea.getText().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Editor vacío. Carga o escribe un fichero primero.",
-                    "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        if (mainDosVeces()) return;   // V8 #698
-        onSave();
-        if (currentFile == null) return;
-        if (!empiezaUnaEjecucion()) return;   // V8 #822: un programa a la vez
+    private CompletableFuture<Resultado> ejecutarEnVentana(Map<String, Object> p) {
+        Resultado antes = antesDeCompilar("ejecutar_ventana", p, /*aLaPlaca*/ false, /*ejecuta*/ true);
+        if (antes != null) return listo(antes);
 
         consolaArea.setText("");
         errors.clear();
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        final StringBuilder salida = new StringBuilder();
+        final java.util.concurrent.atomic.AtomicBoolean compilo = new java.util.concurrent.atomic.AtomicBoolean(false);
+        final java.util.concurrent.atomic.AtomicReference<Integer> codigo = new java.util.concurrent.atomic.AtomicReference<>();
+        final java.util.concurrent.atomic.AtomicReference<String> motivo = new java.util.concurrent.atomic.AtomicReference<>();
 
         final Path bpFile;
         final Path outDir;
@@ -2492,11 +2675,13 @@ public class FrmMain extends javax.swing.JFrame
                         basicplus.frontend.Main.compileFile(bpFile, outDir, "mivm", /*pruneBpi*/ true),
                         this::publish);
                 if (!ok) { publish("== compilación falló ==\n"); return null; }
+                compilo.set(true);   // V9 H2.2
 
                 String moduleName = inferModuleName(bpFile);
                 Path mod = outDir.resolve(moduleName + ".mod");
                 if (!Files.isRegularFile(mod)) {
                     publish("== no se encontró " + mod.getFileName() + " ==\n");
+                    motivo.set("no se encontró " + mod.getFileName());
                     return null;
                 }
 
@@ -2508,6 +2693,7 @@ public class FrmMain extends javax.swing.JFrame
                 if (exe == null || !Files.isRegularFile(exe)) {
                     publish("[vmc] no encuentro bpgenvm-c/build/bpgenvm-c.exe subiendo desde "
                             + bpFile.getParent() + " — compílala con `make LVGL=1`\n");
+                    motivo.set("no encuentro bpgenvm-c/build/bpgenvm-c.exe subiendo desde " + bpFile.getParent());
                     return null;
                 }
                 Path stdlib = repoRoot.resolve("bpstdlib");
@@ -2569,27 +2755,48 @@ public class FrmMain extends javax.swing.JFrame
                     pb.directory(outDir.toFile());
                     pb.redirectErrorStream(true);
                     vmcProcess = pb.start();
+                    final Process proceso = vmcProcess;
                     try (java.io.BufferedReader r = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(vmcProcess.getInputStream(),
+                            new java.io.InputStreamReader(proceso.getInputStream(),
                                     java.nio.charset.StandardCharsets.UTF_8))) {
                         String line;
                         while ((line = r.readLine()) != null) publish(line + "\n");
                     }
-                    publish("== ventana cerrada (exit " + vmcProcess.waitFor() + ") ==\n");
+                    int salio = proceso.waitFor();
+                    codigo.set(salio);   // V9 H2.2
+                    publish("== ventana cerrada (exit " + salio + ") ==\n");
                 } catch (Exception ex) {
                     publish("[vmc] error: " + ex.getMessage() + "\n");
+                    motivo.set("error: " + ex.getMessage());
                 }
                 return null;
             }
             @Override
             protected void process(List<String> chunks) {
-                for (String s : chunks) { appendConsola(s); parseAndAddError(s); }
+                for (String s : chunks) {
+                    appendConsola(s);
+                    parseAndAddError(s);
+                    salida.append(s);   // V9 H2.2: la salida de ESTE comando, al resultado
+                }
             }
             @Override
             protected void done() {
                 acabaLaEjecucion();   // V8 #822
+                Resultado r;
+                Integer c = codigo.get();
+                if (!compilo.get()) {
+                    r = Resultado.mal("ejecutar_ventana: la compilación falló");
+                } else if (c == null) {
+                    r = Resultado.mal("ejecutar_ventana: " + (motivo.get() != null ? motivo.get()
+                                                                                   : "la ventana no llegó a abrirse"));
+                } else {
+                    r = (c == 0 ? Resultado.bien("ejecutar_ventana: la ventana se cerró y el programa acabó bien")
+                                : Resultado.mal("ejecutar_ventana: la VM-C acabó con error")).con("codigo", c);
+                }
+                fin.complete(r.con("errores", erroresEnDatos()).con("salida", salida.toString()));
             }
         }.execute();
+        return fin;
     }
 
     /** Sube directorios desde {@code start} hasta encontrar uno que contenga
@@ -2603,10 +2810,6 @@ public class FrmMain extends javax.swing.JFrame
         return null;
     }
 
-    private void doRun(boolean execute) {
-        comandos.desdeLaVentana(execute ? "ejecutar" : "compilar");   // V9 H2.2: el comando
-    }
-
     /**
      * V9 H2.2 — «compilar» (execute=false) y «ejecutar» en el PC (true): lo de Run → Compile y Run → Run, como comando.
      * El resultado, al acabar: los errores de la compilación, la salida de la consola y, si se ejecutó, cómo acabó el
@@ -2615,20 +2818,8 @@ public class FrmMain extends javax.swing.JFrame
      */
     private CompletableFuture<Resultado> compilarOEjecutar(boolean execute, Map<String, Object> p) {
         final String que = execute ? "ejecutar" : "compilar";
-        if (editorArea.getText().isEmpty()) {
-            return listo(Resultado.aviso("Aviso", "Editor vacío. Carga o escribe un fichero primero.",
-                    JOptionPane.INFORMATION_MESSAGE));
-        }
-        String dos = motivoMainDosVeces();   // V8 #698
-        if (dos != null) return listo(Resultado.aviso("Proyecto", dos, JOptionPane.WARNING_MESSAGE));
-        Resultado guardado = guardarYa(p);
-        if (!guardado.ok) return listo(guardado);
-        if (currentFile == null) return listo(Resultado.mal(que + ": la pestaña no tiene fichero"));
-        if (execute && !marcaUnaEjecucion()) {   // V8 #822: un programa a la vez (compilar, sí)
-            return listo(Resultado.aviso("Un programa a la vez",
-                    "Ya hay un programa en marcha.\nPáralo con Stop antes de ejecutar otro.",
-                    JOptionPane.INFORMATION_MESSAGE));
-        }
+        Resultado antes = antesDeCompilar(que, p, /*aLaPlaca*/ false, execute);
+        if (antes != null) return listo(antes);
 
         consolaArea.setText("");
         errors.clear();
@@ -2728,17 +2919,7 @@ public class FrmMain extends javax.swing.JFrame
     /** V9 H2.2 — el resultado de «compilar» y «ejecutar»: los errores (de la tabla), la salida de la consola y, si se
      *  ejecutó, cómo acabó el programa. */
     private Resultado resultadoDeCompilar(String que, boolean execute, boolean compilo, String salida) {
-        List<Map<String, Object>> errs = new ArrayList<>();
-        for (CompileError ce : errors.snapshot()) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("fichero", ce.file);
-            m.put("linea", ce.line);
-            m.put("columna", ce.column);
-            m.put("tipo", ce.kind);
-            m.put("categoria", ce.category);
-            m.put("mensaje", ce.message);
-            errs.add(m);
-        }
+        List<Map<String, Object>> errs = erroresEnDatos();
         Resultado r;
         if (!compilo) {
             r = Resultado.mal(que + ": la compilación falló");
@@ -2764,28 +2945,18 @@ public class FrmMain extends javax.swing.JFrame
      * upload + ejecución al panel PicoExplorer (que usa su conexión
      * USB CDC ya abierta). El output llega a la consola del IDE vía el
      * outputSink que enchufamos al panel en setupProjectTree().
+     *
+     * V9 H2.2 — el comando «ejecutar_placa»: compila (el proyecto entero, con su pack, o el fichero suelto) y se lo pasa
+     * al panel de la placa, que sube y ejecuta. El resultado, cuando el programa acaba en la placa (o la subida falla):
+     * los errores de la compilación, la salida de la consola y cómo acabó (su EXITED).
      */
-    private void doRunOnPico() {
-        if (editorArea.getText().isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "Editor vacío. Carga o escribe un fichero primero.",
-                    "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        if (mainDosVeces()) return;   // V8 #698
-        if (picoExplorer == null || !picoExplorer.isConnected()) {
-            JOptionPane.showMessageDialog(this,
-                    "Conecta primero la placa desde el panel inferior\n" +
-                    "(ventana inferior izquierda → Connect).",
-                    "Placa no conectada", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        onSave();
-        if (currentFile == null) return;
-        if (!empiezaUnaEjecucion()) return;   // V8 #822: un programa a la vez
+    private CompletableFuture<Resultado> ejecutarEnLaPlaca(Map<String, Object> p) {
+        Resultado antes = antesDeCompilar("ejecutar_placa", p, /*aLaPlaca*/ true, /*ejecuta*/ true);
+        if (antes != null) return listo(antes);
 
         consolaArea.setText("");
         errors.clear();
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
 
         final Path bpFile;
         final Path outDir;
@@ -2859,8 +3030,11 @@ public class FrmMain extends javax.swing.JFrame
             }
             @Override
             protected void done() {
+                Resultado sinLlegar = null;   // V9 H2.2: el resultado, si no se llega a la placa
                 try {
-                    if (Boolean.TRUE.equals(get()) && modPath != null) {
+                    if (!Boolean.TRUE.equals(get()) || modPath == null) {
+                        sinLlegar = Resultado.mal("ejecutar_placa: la compilación falló");
+                    } else {
                         // #310 / hallazgo 18 — un `.pack` viaja CERRADO: dentro van
                         // el main, sus módulos Y los resources del proyecto (los mete
                         // PackStep). Subir además esas copias sueltas no sólo sobra:
@@ -2911,16 +3085,48 @@ public class FrmMain extends javax.swing.JFrame
                             appendConsola("[resources] " + resources.size()
                                     + " fichero(s) de resources/ a subir\n");
                         }
+                        // V9 H2.2 — el fin, cuando el programa acabe en la placa: lo avisa el panel. Después de lo
+                        // que ya está en la cola de la ventana (lo último de la consola).
+                        picoExplorer.alAcabarElSiguienteRun(estado -> SwingUtilities.invokeLater(
+                                () -> fin.complete(resultadoDeLaPlaca(estado))));
                         picoExplorer.uploadAndRun(modPath.toFile(), deps, libDeps,
                                 null, resources, deviceAppPrefix());
                     }
                 } catch (Exception ex) {
                     appendConsola("[ide] error: " + ex.getMessage() + "\n");
+                    picoExplorer.alAcabarElSiguienteRun(null);
+                    sinLlegar = Resultado.mal("ejecutar_placa: " + ex.getMessage());
                 } finally {
                     acabaLaEjecucion();   // V8 #822: desde aquí lo lleva el explorador (hayUnProgramaEnLaPlaca)
                 }
+                if (sinLlegar != null) {
+                    final Resultado r = sinLlegar;
+                    SwingUtilities.invokeLater(() -> fin.complete(
+                            r.con("errores", erroresEnDatos()).con("salida", consolaArea.getText())));
+                }
             }
         }.execute();
+        return fin;
+    }
+
+    /** V9 H2.2 — el resultado de «ejecutar_placa», con lo que dice el panel al acabar («exit N (…)», o «error: …» si
+     *  la subida falló): los errores, la salida de la consola (la de este programa: se vació al empezar) y cómo acabó
+     *  el programa en la placa. */
+    private Resultado resultadoDeLaPlaca(String estado) {
+        Resultado r;
+        edu.bpgenvm.vm.debug.ExitedEvent ex = picoExplorer.ultimoExited();
+        if (estado != null && estado.startsWith("error:")) {
+            r = Resultado.mal("ejecutar_placa: " + estado);
+        } else if (ex == null) {
+            r = Resultado.mal("ejecutar_placa: el programa acabó sin decir cómo (" + estado + ")");
+        } else {
+            r = ex.exitCode == 0 ? Resultado.bien("ejecutar_placa: el programa acabó bien")
+                                 : Resultado.mal("ejecutar_placa: el programa acabó con error");
+            r.con("codigo", ex.exitCode).con("estado", ex.reason);
+            if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
+            if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
+        }
+        return r.con("fin", estado).con("errores", erroresEnDatos()).con("salida", consolaArea.getText());
     }
 
     /**
@@ -3744,13 +3950,13 @@ public class FrmMain extends javax.swing.JFrame
      *  `--dao-build` por línea de órdenes: se llama a `DaoGen.generar` y se
      *  vuelca su resultado a la consola tal cual — avisos, errores y qué
      *  ficheros se han escrito o estaban ya al día. No se resume ni se
-     *  reinterpreta: el generador ya dice lo que hay que saber. */
-    private void doDaoBuild() {
+     *  reinterpreta: el generador ya dice lo que hay que saber.
+     *  V9 H2.2 — el comando «dao»; el resultado lleva lo que dice el generador (sus avisos, sus errores, lo generado y lo
+     *  que ya estaba al día). */
+    private Resultado daoBuild() {
         if (currentProject == null) {
-            javax.swing.JOptionPane.showMessageDialog(this,
-                    "No hay proyecto abierto. Abre o crea un proyecto (.bpbuild).",
-                    "DAO build", javax.swing.JOptionPane.INFORMATION_MESSAGE);
-            return;
+            return Resultado.aviso("DAO build", "No hay proyecto abierto. Abre o crea un proyecto (.bpbuild).",
+                    JOptionPane.INFORMATION_MESSAGE);
         }
         appendConsola("== DAO build: " + currentProjectFile.getFileName() + " ==" + "\n");
         try {
@@ -3763,14 +3969,18 @@ public class FrmMain extends javax.swing.JFrame
             if (!r.ok()) {
                 appendConsola("== DAO build: NO se ha generado nada (" + r.errores.size()
                         + " errores) ==" + "\n");
-                return;
+                return Resultado.mal("DAO build: NO se ha generado nada (" + r.errores.size() + " errores)")
+                        .con("errores", r.errores).con("avisos", r.avisos);
             }
             appendConsola("== DAO build OK: " + r.entidades + " entidad(es), "
                     + r.escritos.size() + " escrito(s), " + r.sinCambios.size()
                     + " ya al dia ==" + "\n");
             refreshProjectTree();          // los .bp nuevos salen en el árbol
+            return Resultado.bien("DAO build OK: " + r.entidades + " entidad(es)").con("entidades", r.entidades)
+                    .con("generados", r.escritos).con("al_dia", r.sinCambios).con("avisos", r.avisos);
         } catch (Exception ex) {
             appendConsola("== DAO build: " + ex + " ==" + "\n");
+            return Resultado.mal("DAO build: " + ex);
         }
     }
 
@@ -3840,7 +4050,11 @@ public class FrmMain extends javax.swing.JFrame
         String msg   = m.group(5).trim();
         String fname = currentFile != null ? currentFile.getFileName().toString() : "?";
         CompileError ce = new CompileError(fname, ln, col, kind, cat, msg);
-        SwingUtilities.invokeLater(() -> errors.add(ce));
+        /* V9 H2.2 — en el hilo de la ventana (los process() de los SwingWorker), a la tabla YA: el done() corre en el
+         * mismo evento que el último process(), y con un invokeLater el resultado del comando miraba la tabla antes de
+         * que llegase el error (compilar daba «errores = []» con el error en la salida). Desde otro hilo, como antes. */
+        if (SwingUtilities.isEventDispatchThread()) errors.add(ce);
+        else SwingUtilities.invokeLater(() -> errors.add(ce));
     }
 
     /**
