@@ -599,7 +599,7 @@ public class FrmMain extends javax.swing.JFrame
                   toolButton("gestion_placa"),
                   toolButton("entorno_placa"),
                   btnDaoBuild = toolButton("dao"),
-                  toolButton("Debug",         "Depurar",             e -> doDebug()),
+                  toolButton("depurar"),
                   toolButton("parar"));
 
         /* #395 — el estado inicial: al arrancar no hay proyecto, asi que el
@@ -1473,15 +1473,8 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     /** V8 #698 — con el main en `.bp` y en `.jc` a la vez, el proyecto no adivina cuál: se dice, y no se compila
-     *  (como `Main.buildProject`). Va antes de tocar nada, al principio de cada orden. */
-    private boolean mainDosVeces() {
-        String motivo = motivoMainDosVeces();
-        if (motivo == null) return false;
-        JOptionPane.showMessageDialog(this, motivo, "Proyecto", JOptionPane.WARNING_MESSAGE);
-        return true;
-    }
-
-    /** V9 H2.2 — lo de mainDosVeces sin el diálogo (para los comandos): el motivo, o null si no pasa. */
+     *  (como `Main.buildProject`). Va antes de tocar nada, al principio de cada orden. V9 H2.2: sin el diálogo (el
+     *  aviso va en el resultado: antesDeCompilar); el motivo, o null si no pasa. */
     private String motivoMainDosVeces() {
         if (currentProject == null) return null;
         java.nio.file.Path bp = java.nio.file.Paths.get(currentProject.sourceDir, currentProject.main + ".bp");
@@ -1824,15 +1817,15 @@ public class FrmMain extends javax.swing.JFrame
     private void setupDebug() {
         // Menú Debug con sus items y atajos.
         JMenu menuDebug = new JMenu("Debug");
-        JMenuItem miDebugRun    = mi("Debug",            KeyEvent.VK_F5,  KeyEvent.SHIFT_DOWN_MASK,  e -> doDebug());
-        JMenuItem miDebugOnPico = new JMenuItem("Debug on Device");
-        miDebugOnPico.addActionListener(e -> doDebugOnPico());
-        JMenuItem miContinue    = mi("Continue",         KeyEvent.VK_F5,  0,                         e -> debug.sendCommand(StepCommand.CONTINUE));
-        JMenuItem miStepOver    = mi("Step Over",        KeyEvent.VK_F10, 0,                         e -> debug.sendCommand(StepCommand.STEP_OVER));
-        JMenuItem miStepInto    = mi("Step Into",        KeyEvent.VK_F11, 0,                         e -> debug.sendCommand(StepCommand.STEP_INTO));
-        JMenuItem miStepOut     = mi("Step Out",         KeyEvent.VK_F11, KeyEvent.SHIFT_DOWN_MASK,  e -> debug.sendCommand(StepCommand.STEP_OUT));
-        JMenuItem miStop        = mi("Stop",             KeyEvent.VK_F5,  KeyEvent.CTRL_DOWN_MASK,   e -> debug.sendCommand(StepCommand.STOP));
-        JMenuItem miToggleBP    = mi("Toggle Breakpoint",KeyEvent.VK_F9,  0,                         e -> onToggleBreakpoint());
+        // V9 H2.2 — cada uno, un comando (sus atajos, los del comando: F5, F9, F10, F11…).
+        JMenuItem miDebugRun    = new JMenuItem(comandos.accion("depurar"));
+        JMenuItem miDebugOnPico = new JMenuItem(comandos.accion("depurar_placa"));
+        JMenuItem miContinue    = new JMenuItem(comandos.accion("continuar"));
+        JMenuItem miStepOver    = new JMenuItem(comandos.accion("paso_sobre"));
+        JMenuItem miStepInto    = new JMenuItem(comandos.accion("paso_dentro"));
+        JMenuItem miStepOut     = new JMenuItem(comandos.accion("paso_fuera"));
+        JMenuItem miStop        = new JMenuItem(comandos.accion("parar_depuracion"));
+        JMenuItem miToggleBP    = new JMenuItem(comandos.accion("punto_parada"));
         menuDebug.add(miDebugRun);
         menuDebug.add(miDebugOnPico);
         menuDebug.addSeparator();
@@ -1890,6 +1883,7 @@ public class FrmMain extends javax.swing.JFrame
                 // capturamos cs y aplicamos los breakpoints del editor como pc
                 // (pc = relPc + cs). Si hay alguno, CONTINUE (run-to-breakpoint)
                 // sin pintar la entrada; si no, caemos a mostrar la pausa inicial.
+                // V9 H2.2: también en el PC, en cada sesión (lo mismo en los dos).
                 if (deviceDbg != null && !deviceEntryHandled) {
                     deviceEntryHandled = true;
                     deviceCs = pe.cs;
@@ -1918,13 +1912,129 @@ public class FrmMain extends javax.swing.JFrame
                             ? java.util.Collections.emptyList()
                             : debug.getModuleProperties(2000);
                 SwingUtilities.invokeLater(() -> onDebugPaused(pe, locals, named, frames, props));
+                avisaLaParada(resultadoDeLaPausa(pe, named));   // V9 H2.2: a quien espere la próxima parada
             } else if (e instanceof edu.bpgenvm.vm.debug.ResumedEvent) {
                 SwingUtilities.invokeLater(this::onDebugResumed);
             } else if (e instanceof edu.bpgenvm.vm.debug.ExitedEvent) {
                 TrazaDeLaVmLocal t = trazaDepurando;   // V8 #788: depurando con la VM local, dónde falló
                 if (t != null) t.alAcabar((edu.bpgenvm.vm.debug.ExitedEvent) e);
                 SwingUtilities.invokeLater(this::onDebugResumed);
+                // V9 H2.2 — el fin, a quien espera la próxima parada, cuando el IDE ya puede ejecutar otro programa.
+                depuradoAcabado = true;
+                Resultado fin = resultadoDelFinDepurando((edu.bpgenvm.vm.debug.ExitedEvent) e);
+                BpvmClient c = debug.client();
+                if (c != null && c == activeRunClient) {
+                    // Con la VM local, la sesión la suelta runOnVmRemote al volver: el fin, en el done() de «depurar»
+                    // (el primero: la VM-Java manda dos EXITED).
+                    if (finDepurandoEnElPc == null) finDepurandoEnElPc = fin;
+                } else {
+                    /* En la placa, nadie la soltaba al acabar el programa, y desde #822 una sesión enganchada es «un
+                     * programa en marcha»: tras un Debug on Device, el IDE no dejaba ejecutar nada más (medido el 22-nov
+                     * con el micro simulado: el Run on Device de después, «Ya hay un programa en marcha»). Se suelta aquí. */
+                    debug.detach();
+                    deviceDbg = null;
+                    avisaLaParada(fin);
+                }
             }
+        });
+    }
+
+    /**
+     * V9 H2.2 — los comandos del depurador (depurar, continuar, los pasos, parar) acaban en la PRÓXIMA PARADA: la
+     * próxima pausa (dónde, con sus locales) o el fin del programa. Quien la espera, aquí: uno (la orden siguiente lo
+     * releva). Lo completa el oyente de la sesión, en el hilo del cable.
+     */
+    private final java.util.concurrent.atomic.AtomicReference<EsperaDeParada> proximaParada =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
+    /** La salida del programa que se depura, según llega por el cable: en el hilo del cable, EN ORDEN con sus avisos de
+     *  pausa y de fin (la consola la recibe más tarde, por el SwingWorker). La de cada orden, a su resultado. */
+    private final StringBuffer salidaDepurando = new StringBuffer();
+
+    /** Acabó el programa que se depura (llegó su EXITED): las órdenes ya no tienen a quién ir, aunque la sesión tarde un
+     *  poco en soltarse. */
+    private volatile boolean depuradoAcabado;
+
+    /** El fin del programa depurado con la VM local, guardado hasta que la sesión se suelta (el done() de «depurar»). */
+    private volatile Resultado finDepurandoEnElPc;
+
+    /** Quien espera la próxima parada: su resultado, y dónde empezaba la salida del programa cuando dio su orden. */
+    private static final class EsperaDeParada {
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        final int desde;
+        EsperaDeParada(int desde) { this.desde = desde; }
+    }
+
+    /** La próxima parada, para quien la pide; la que esperaba otro, relevada (se le dice). */
+    private CompletableFuture<Resultado> esperaLaProximaParada() {
+        EsperaDeParada e = new EsperaDeParada(salidaDepurando.length());
+        EsperaDeParada antes = proximaParada.getAndSet(e);
+        if (antes != null) antes.fin.complete(Resultado.mal("la relevó otra orden del depurador antes de parar"));
+        return e.fin;
+    }
+
+    /** Una sesión de depuración nueva: sin salida y sin acabar. */
+    private void empiezaUnaDepuracion() {
+        salidaDepurando.setLength(0);
+        depuradoAcabado = false;
+        finDepurandoEnElPc = null;
+    }
+
+    /** La parada, a quien la espera (si alguien la espera), con la salida del programa desde que dio su orden. */
+    private void avisaLaParada(Resultado r) {
+        EsperaDeParada e = proximaParada.getAndSet(null);
+        if (e == null) return;
+        String todo = salidaDepurando.toString();
+        e.fin.complete(r.con("salida", todo.substring(Math.min(Math.max(0, e.desde), todo.length()))));
+    }
+
+    /** Una pausa, en datos: dónde (en la placa, que no manda símbolos, la línea sale del .dbg del IDE: H6) y los locales
+     *  por nombre. */
+    private Resultado resultadoDeLaPausa(edu.bpgenvm.vm.debug.PausedEvent pe, List<BpvmClient.NamedLocal> named) {
+        String fichero = pe.sourceFile;
+        int linea = pe.line;
+        edu.bpgenvm.vm.debug.DbgFile dbg = deviceDbg;
+        if (linea <= 0 && dbg != null) {
+            linea = dbg.lineForRelPc(pe.absPc - pe.cs);
+            if (fichero == null) fichero = dbg.getSource();
+        }
+        List<Map<String, Object>> locales = new ArrayList<>();
+        for (BpvmClient.NamedLocal l : named) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("nombre", l.name);
+            m.put("tipo", l.type);
+            m.put("valor", l.display != null ? l.display : String.valueOf(l.value));
+            locales.add(m);
+        }
+        return Resultado.bien("parado" + (linea > 0 ? " en la línea " + linea : "") + (fichero != null ? " de " + fichero : ""))
+                .con("parado", true).con("fichero", fichero).con("linea", linea).con("locales", locales);
+    }
+
+    /** El fin del programa depurado, en datos: lo mismo que el de «ejecutar» (el código, el estado, lo que tardó y, si
+     *  falló, dónde). */
+    private static Resultado resultadoDelFinDepurando(edu.bpgenvm.vm.debug.ExitedEvent ex) {
+        Resultado r = ex.exitCode == 0 ? Resultado.bien("el programa acabó bien")
+                                       : Resultado.mal("el programa acabó con error");
+        r.con("parado", false).con("codigo", ex.exitCode).con("estado", ex.reason);
+        if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
+        if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
+        return r;
+    }
+
+    /** V9 H2.2 — continuar, los tres pasos y parar: la orden, y el resultado en la próxima parada. Sin sesión, lo dice
+     *  (antes, la tecla no hacía nada; desde la ventana, sigue sin hacer nada que se vea). */
+    private CompletableFuture<Resultado> ordenAlDepurador(StepCommand orden, String que) {
+        if (!debug.isAttached()) return listo(Resultado.mal(que + ": no hay ninguna sesión de depuración"));
+        if (depuradoAcabado) return listo(Resultado.mal(que + ": el programa ya acabó"));
+        CompletableFuture<Resultado> f = esperaLaProximaParada();
+        debug.sendCommand(orden);
+        if (orden != StepCommand.STOP) return f;
+        // Parar: que el programa acabe (killed) es lo que se pidió, así que va bien.
+        return f.thenApply(r -> {
+            if (!Boolean.FALSE.equals(r.datos().get("parado"))) return r;
+            Resultado bien = Resultado.bien(que + ": el programa se paró");
+            for (Map.Entry<String, Object> d : r.datos().entrySet()) bien.con(d.getKey(), d.getValue());
+            return bien;
         });
     }
 
@@ -1991,29 +2101,50 @@ public class FrmMain extends javax.swing.JFrame
         }
     }
 
-    /** Crea un JMenuItem con accelerator y listener. */
-    private static JMenuItem mi(String text, int key, int modifiers,
-                                java.awt.event.ActionListener al) {
-        JMenuItem item = new JMenuItem(text);
-        if (key != 0) item.setAccelerator(KeyStroke.getKeyStroke(key, modifiers));
-        item.addActionListener(al);
-        return item;
+    /** Desde la ventana, el punto de parada va en la línea del cursor del fichero activo (F9), como siempre; sin
+     *  fichero, nada, y el resultado lo dice. */
+    private Map<String, Object> pideElPuntoDeParada() {
+        Map<String, Object> p = new HashMap<>();
+        if (currentFile != null) {
+            p.put("fichero", currentFile.getFileName().toString());
+            p.put("linea", caretLine(editorArea));
+        }
+        return p;
     }
 
-    /** F9 / menú: alterna breakpoint en la línea donde está el caret. */
-    private void onToggleBreakpoint() {
-        if (currentFile == null) {
-            JOptionPane.showMessageDialog(this,
-                    "Guarda primero el fichero para poner breakpoints.",
-                    "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
+    /**
+     * F9 / menú: alterna breakpoint en la línea donde está el caret. V9 H2.2 — el comando «punto_parada»: en `fichero`
+     * (su nombre, como lo guarda el editor) y `linea`; con `poner` (true o false), lo deja así en vez de alternarlo.
+     */
+    private Resultado puntoDeParada(Map<String, Object> p) {
+        Object f = p.get("fichero");
+        Object l = p.get("linea");
+        if (f == null || l == null) {
+            if (currentFile == null) {
+                return Resultado.aviso("Aviso", "Guarda primero el fichero para poner breakpoints.",
+                        JOptionPane.INFORMATION_MESSAGE);
+            }
+            if (f == null) f = currentFile.getFileName().toString();
+            if (l == null) l = caretLine(editorArea);
         }
-        int line = caretLine(editorArea);
-        boolean puesto = debug.toggleBreakpoint(currentFile.getFileName().toString(), line);
+        String fichero = java.nio.file.Paths.get(f.toString()).getFileName().toString();
+        int line;
+        try {
+            line = (l instanceof Number) ? ((Number) l).intValue() : Integer.parseInt(l.toString().trim());
+        } catch (NumberFormatException ex) {
+            return Resultado.mal("punto_parada: 'linea' no es un número: " + l);
+        }
+        Object poner = p.get("poner");
+        boolean puesto;
+        if (poner != null && Boolean.parseBoolean(poner.toString()) == debug.isBreakpointAt(fichero, line)) {
+            puesto = debug.isBreakpointAt(fichero, line);   // ya está como lo piden
+        } else {
+            puesto = debug.toggleBreakpoint(fichero, line);
+        }
         /* V7 #583 (9-oct) — un breakpoint DENTRO de una native no para en la placa: el CALL salta al código máquina
          * sin pasar por el bytecode de la función (en el PC sí para: allí corre interpretada). Se dice al ponerlo.
          * Eduardo: «No depuramos las natives. Si quieres ejecutar paso a paso le quitas native». */
-        if (puesto) {
+        if (puesto && currentFile != null && fichero.equals(currentFile.getFileName().toString())) {
             String nativa = basicplus.frontend.NativaEnLinea.nativaQueContiene(editorArea.getText(), line);
             if (nativa != null) {
                 appendConsola("== Breakpoint en la línea " + line + ", dentro de la native '" + nativa
@@ -2021,6 +2152,8 @@ public class FrmMain extends javax.swing.JFrame
                         + " Para seguirla paso a paso, quítale `native` ==\n");
             }
         }
+        return Resultado.bien((puesto ? "puesto" : "quitado") + " el punto de parada en la línea " + line + " de "
+                + fichero).con("fichero", fichero).con("linea", line).con("puesto", puesto);
     }
 
     /** Devuelve la línea 1-based del caret en el editor. */
@@ -2120,22 +2253,27 @@ public class FrmMain extends javax.swing.JFrame
      * Debug Run: similar a Run pero instala el DebugHook ANTES de
      * vm.run(). El hook bloquea en cada cambio de línea y la UI controla
      * los pasos.
+     *
+     * V9 H2.2 — el comando «depurar». El resultado, en la primera parada (la de la entrada: dónde y sus locales), o
+     * si no llega a parar, por qué (la compilación, con sus errores).
      */
-    private void doDebug() {
-        if (editorArea.getText().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Editor vacío.",
-                    "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        if (mainDosVeces()) return;   // V8 #698
-        onSave();
-        if (currentFile == null) return;
-        if (!empiezaUnaEjecucion()) return;   // V8 #822: un programa a la vez
+    private CompletableFuture<Resultado> depurar(Map<String, Object> p) {
+        Resultado antes = antesDeCompilar("depurar", p, /*aLaPlaca*/ false, /*ejecuta*/ true);
+        if (antes != null) return listo(antes);
 
         consolaArea.setText("");
         errors.clear();
         debug.reset();
         debuggingActive = true;
+        empiezaUnaDepuracion();
+        /* V9 H2.2 — en el PC, como en la placa (Eduardo, 22-nov: «Como en la placa»): con puntos de parada, el Debug va
+         * al primero; sin ninguno, para en la entrada. La pausa de entrada se re-procesa en CADA sesión: antes sólo se
+         * hacía al depurar en la placa, y en el PC valía la primera vez tras abrir el IDE (las siguientes paraban en la
+         * entrada, con puntos de parada o sin ellos). */
+        deviceEntryHandled = false;
+        deviceCs = 0;
+        final CompletableFuture<Resultado> fin = esperaLaProximaParada();
+        final java.util.concurrent.atomic.AtomicBoolean compilo = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         // Modo proyecto: el .bp a compilar es <sourceDir>/<main>.bp y el
         // output va a <outDir>. Si no hay proyecto, comportamiento histórico
@@ -2162,6 +2300,7 @@ public class FrmMain extends javax.swing.JFrame
                     publish("== compilación falló ==\n");
                     return null;
                 }
+                compilo.set(true);   // V9 H2.2
                 String moduleName = inferModuleName(bpFile);
                 Path mod = outDir.resolve(moduleName + ".mod");
                 if (!Files.isRegularFile(mod)) {
@@ -2192,8 +2331,20 @@ public class FrmMain extends javax.swing.JFrame
                 onDebugResumed();
                 currentModuleManager = null;
                 acabaLaEjecucion();   // V8 #822
+                // V9 H2.2 — el fin del programa, ya suelta la sesión; y si no llegó (la compilación falló, o la sesión
+                // acabó sin su EXITED), por qué.
+                Resultado finDelPrograma = finDepurandoEnElPc;
+                finDepurandoEnElPc = null;
+                if (finDelPrograma != null) {
+                    avisaLaParada(finDelPrograma);
+                } else {
+                    avisaLaParada((compilo.get() ? Resultado.mal("depurar: la sesión de depuración acabó")
+                                                 : Resultado.mal("depurar: la compilación falló"))
+                            .con("errores", erroresEnDatos()));
+                }
             }
         }.execute();
+        return fin;
     }
 
     /**
@@ -2342,6 +2493,33 @@ public class FrmMain extends javax.swing.JFrame
                 .ayuda("Comentar selección");
         comandos.registra("descomentar", "Uncomment", p -> listo(editCommentSelection(false)))
                 .ayuda("Descomentar selección");
+
+        // -- La tercera tanda: el depurador. Depurar y las órdenes de paso acaban en la próxima parada (dónde, con sus
+        //    locales, y la salida desde la orden) o en el fin del programa (su código).
+        comandos.registra("depurar", "Debug", this::depurar)
+                .ayuda("Depurar")
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F5, KeyEvent.SHIFT_DOWN_MASK))
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaCompilar);
+        comandos.registra("depurar_placa", "Debug on Device", this::depurarEnLaPlaca)
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaLaPlaca);
+        comandos.registra("continuar", "Continue", p -> ordenAlDepurador(StepCommand.CONTINUE, "continuar"))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0));
+        comandos.registra("paso_sobre", "Step Over", p -> ordenAlDepurador(StepCommand.STEP_OVER, "paso_sobre"))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F10, 0));
+        comandos.registra("paso_dentro", "Step Into", p -> ordenAlDepurador(StepCommand.STEP_INTO, "paso_dentro"))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F11, 0));
+        comandos.registra("paso_fuera", "Step Out", p -> ordenAlDepurador(StepCommand.STEP_OUT, "paso_fuera"))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F11, KeyEvent.SHIFT_DOWN_MASK));
+        comandos.registra("parar_depuracion", "Stop", p -> ordenAlDepurador(StepCommand.STOP, "parar_depuracion"))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F5, KeyEvent.CTRL_DOWN_MASK));
+        comandos.registra("punto_parada", "Toggle Breakpoint", p -> listo(puntoDeParada(p)))
+                .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F9, 0))
+                .parametro("fichero", "el fichero (su nombre, como en el editor)")
+                .parametro("linea", "la línea")
+                .parametro("poner", "true lo pone y false lo quita; sin él, lo alterna (F9)")
+                .pide(this::pideElPuntoDeParada);
 
         // -- Los que son su diálogo (una configuración, la gestión de la placa, la ayuda, salir): sólo desde la ventana.
         comandos.registra("propiedades_proyecto", "Project Properties...",
@@ -2610,14 +2788,12 @@ public class FrmMain extends javax.swing.JFrame
      * V9 H2.2: es el comando «nuevo» (nuevoFichero).
      */
 
-    /**
+    /*
      * File → Save: escribe al fichero del tab activo. Si el tab no tiene
      * Path asociado (buffer nuevo sin guardar), pide uno con JFileChooser
      * y lo asocia al OpenFile del tab. Actualiza el título del tab.
+     * V9 H2.2: es el comando «guardar» (pideNombreSiHaceFalta y guardarYa).
      */
-    private void onSave() {
-        comandos.desdeLaVentana("guardar");   // V9 H2.2: el comando (síncrono: lo de después ve lo guardado)
-    }
 
     /**
      * Run → Compile (execute=false) o Run → Run (execute=true).
@@ -3251,31 +3427,21 @@ public class FrmMain extends javax.swing.JFrame
      * manifiesten sobre HW se cazan con `print` instrumentado.
      *
      * Cuando v2 traiga #140, este método se sustituye por la llamada
-     * análoga a doDebug() — el transporte ya existe (SerialBackend
+     * análoga a doDebug() (hoy, «depurar») — el transporte ya existe (SerialBackend
      * sobre BpvmClient.connectSerial), sólo hay que dejar de
      * cortocircuitar y pasar `waitClient=true`.
+     *
+     * V9 H2.2 — el comando «depurar_placa». El resultado, en la primera parada que se enseña (la de la entrada, o el
+     * primer punto de parada si los hay: run-to-breakpoint), o si no llega a parar, por qué.
      */
-    private void doDebugOnPico() {
-        if (editorArea.getText().isEmpty()) {
-            JOptionPane.showMessageDialog(this,
-                    "Editor vacío. Carga o escribe un fichero primero.",
-                    "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-        if (mainDosVeces()) return;   // V8 #698
-        if (picoExplorer == null || !picoExplorer.isConnected()) {
-            JOptionPane.showMessageDialog(this,
-                    "Conecta primero la placa desde el panel inferior\n" +
-                    "(ventana inferior izquierda → Connect).",
-                    "Placa no conectada", JOptionPane.WARNING_MESSAGE);
-            return;
-        }
-        onSave();
-        if (currentFile == null) return;
-        if (!empiezaUnaEjecucion()) return;   // V8 #822: un programa a la vez
+    private CompletableFuture<Resultado> depurarEnLaPlaca(Map<String, Object> p) {
+        Resultado antes = antesDeCompilar("depurar_placa", p, /*aLaPlaca*/ true, /*ejecuta*/ true);
+        if (antes != null) return listo(antes);
 
         consolaArea.setText("");
         errors.clear();
+        empiezaUnaDepuracion();
+        final CompletableFuture<Resultado> fin = esperaLaProximaParada();
 
         final Path bpFile;
         final Path outDir;
@@ -3314,7 +3480,11 @@ public class FrmMain extends javax.swing.JFrame
             @Override
             protected void done() {
                 try {
-                    if (!Boolean.TRUE.equals(get()) || modPath == null) return;
+                    if (!Boolean.TRUE.equals(get()) || modPath == null) {
+                        avisaLaParada(Resultado.mal("depurar_placa: la compilación falló")   // V9 H2.2
+                                .con("errores", erroresEnDatos()));
+                        return;
+                    }
                     // .dbg para resolver locales por nombre en el device (regla de oro H6).
                     deviceDbg = edu.bpgenvm.vm.debug.DbgFile.load(
                             outDir.resolve(base + ".dbg").toString());
@@ -3328,11 +3498,18 @@ public class FrmMain extends javax.swing.JFrame
                     java.util.Set<String> libDeps = stdlibDepNames(deps, outDir);   // #466: como en Run
                     final String remoteMain = deviceAppPrefix() + "/" + base + ".mod";   // F2 (H19)
                     appendConsola("[debug] subiendo + enganchando sesión de debug en la placa...\n");
+                    // V9 H2.2 — si la subida falla, quien espera la primera parada lo sabe (el panel lo avisa).
+                    picoExplorer.alAcabarElSiguienteRun(estado -> {
+                        if (estado != null && estado.startsWith("error:")) {
+                            avisaLaParada(Resultado.mal("depurar_placa: " + estado));
+                        }
+                    });
                     // uploadAndRun con debugHook: sube los ficheros y, en vez de
                     // ejecutar en bloqueante, cede el client serie ya conectado.
                     picoExplorer.uploadAndRun(modPath.toFile(), deps, libDeps, client -> {
                         if (client == null) {
                             appendConsola("[debug] no se pudo obtener el client serie\n");
+                            avisaLaParada(Resultado.mal("depurar_placa: no se pudo obtener el client serie"));
                             return;
                         }
                         // La SALIDA del programa. Faltaba, y por eso una sesión de
@@ -3342,7 +3519,10 @@ public class FrmMain extends javax.swing.JFrame
                         // llama a runModule() directo. Los eventos OUTPUT llegaban
                         // a BpvmClient, encontraban el sink a null y se tiraban EN
                         // SILENCIO. appendConsola ya salta al EDT por su cuenta.
-                        client.setOutputSink(FrmMain.this::appendConsola);
+                        client.setOutputSink(s -> {
+                            salidaDepurando.append(s);   // V9 H2.2: en orden con las pausas, para los resultados
+                            appendConsola(s);
+                        });
                         debug.attach(client);            // el listener (onDebugPaused) ya está puesto
                         client.requestPause();           // rompe en el 1er opcode → BP_HIT(cs)
                         try {                            // arranca; cada pausa pinta locales por nombre
@@ -3350,6 +3530,8 @@ public class FrmMain extends javax.swing.JFrame
                         } catch (java.io.IOException ex) {
                             appendConsola("[debug] la placa no arranca el programa: " + ex.getMessage() + "\n");
                             debug.detach();
+                            avisaLaParada(Resultado.mal("depurar_placa: la placa no arranca el programa: "
+                                    + ex.getMessage()));
                             return;
                         }
                         appendConsola("[debug] sesión activa. Breakpoints del editor → run-to-breakpoint;"
@@ -3357,11 +3539,14 @@ public class FrmMain extends javax.swing.JFrame
                     }, collectProjectResources(), deviceAppPrefix());   // H12 (#260) + F2 (H19)
                 } catch (Exception ex) {
                     appendConsola("[debug] error: " + ex.getMessage() + "\n");
+                    picoExplorer.alAcabarElSiguienteRun(null);
+                    avisaLaParada(Resultado.mal("depurar_placa: " + ex.getMessage()));
                 } finally {
                     acabaLaEjecucion();   // V8 #822: desde aquí, la sesión de depuración (debug.isAttached) y el explorador
                 }
             }
         }.execute();
+        return fin;
     }
 
     /** Nombres de módulos stdlib core que ya están pre-instalados en el
@@ -3514,7 +3699,14 @@ public class FrmMain extends javax.swing.JFrame
             try (BpvmClient client = new BpvmClient()) {
                 activeRunClient = client;   // P-run-stop (#257): visible para Stop
                 client.setDiagSink(s -> publish.accept("[vm] " + s + "\n"));
-                client.setOutputSink(publish::accept);
+                if (pauseInitially) {
+                    client.setOutputSink(s -> {
+                        salidaDepurando.append(s);   // V9 H2.2: depurando, en orden con las pausas (los resultados)
+                        publish.accept(s);
+                    });
+                } else {
+                    client.setOutputSink(publish::accept);
+                }
                 // N20 — IO.prompt(spec) del programa BP abre un JDialog
                 // construido a partir del spec JSON. Las respuestas
                 // serializadas regresan al thread BP bloqueado.
@@ -3635,18 +3827,10 @@ public class FrmMain extends javax.swing.JFrame
                 || (picoExplorer != null && picoExplorer.hayUnProgramaEnLaPlaca());
     }
 
-    /** V8 #822 — true si puede empezar una ejecución, y la marca; si ya hay un programa en marcha, lo dice y false. */
-    /** V9 H2.2 — lo de empiezaUnaEjecucion sin el diálogo (para los comandos): true si puede empezar, y la marca. */
+    /** V8 #822 — true si puede empezar una ejecución, y la marca; si ya hay un programa en marcha, false. V9 H2.2: sin
+     *  el diálogo (el aviso, «Un programa a la vez», va en el resultado: antesDeCompilar). */
     private boolean marcaUnaEjecucion() {
         return !hayUnProgramaEnMarcha() && ejecutando.compareAndSet(false, true);
-    }
-
-    private boolean empiezaUnaEjecucion() {
-        if (marcaUnaEjecucion()) return true;
-        JOptionPane.showMessageDialog(this,
-                "Ya hay un programa en marcha.\nPáralo con Stop antes de ejecutar otro.",
-                "Un programa a la vez", JOptionPane.INFORMATION_MESSAGE);
-        return false;
     }
 
     private void acabaLaEjecucion() { ejecutando.set(false); }
@@ -3909,10 +4093,14 @@ public class FrmMain extends javax.swing.JFrame
 
     /** Append thread-safe a la consola. */
     private void appendConsola(String s) {
-        SwingUtilities.invokeLater(() -> {
+        Runnable escribe = () -> {
             consolaArea.append(s);
             consolaArea.setCaretPosition(consolaArea.getDocument().getLength());
-        });
+        };
+        /* V9 H2.2 — en el hilo de la ventana, YA: con un invokeLater, lo que el panel de la placa escribe directo se
+         * adelantaba a lo que estaba en la cola («[Explorer] subiendo…» salía antes que la compilación). */
+        if (SwingUtilities.isEventDispatchThread()) escribe.run();
+        else SwingUtilities.invokeLater(escribe);
     }
 
     /**
