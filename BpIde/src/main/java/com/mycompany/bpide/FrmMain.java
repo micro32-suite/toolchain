@@ -650,6 +650,7 @@ public class FrmMain extends javax.swing.JFrame
         jMenu3.add(new JMenuItem(comandos.accion("limpiar_consola")));
 
         setupDebug();
+        setupIa();     // V9 H2.3: el menú IA (el servidor para la IA), entre Debug y Help
         setupHelp();
         setupToolbar();   // H12: barra de botones (archivos · ejecución · edición)
 
@@ -2556,6 +2557,90 @@ public class FrmMain extends javax.swing.JFrame
     /** Los comandos del IDE: los del menú y la barra, por su nombre. */
     private Comandos comandos;
 
+    /* ===== V9 H2.3 — el servidor para la IA (MCP), y su menú ===== */
+
+    /** El servidor para la IA (apagado hasta que se encienda en el menú IA). */
+    private ServidorIa servidorIa;
+    /** Su interruptor en el menú, que enseña si está en marcha. */
+    private javax.swing.JCheckBoxMenuItem miServidorIa;
+
+    /** Lo que espera el servidor a un comando antes de contestar a la IA que sigue en marcha. */
+    private static final long PLAZO_IA_MS = 300_000L;
+
+    /** El menú IA (Eduardo: «Un menú IA»): encender o apagar el servidor, y cómo conectarse. */
+    private void setupIa() {
+        servidorIa = new ServidorIa(comandos, this::appendConsola, PLAZO_IA_MS);
+        JMenu menuIa = new JMenu("IA");
+        miServidorIa = new javax.swing.JCheckBoxMenuItem(comandos.accion("servidor_ia"));
+        menuIa.add(miServidorIa);
+        menuIa.add(new JMenuItem(comandos.accion("conectar_ia")));
+        jMenuBar1.add(menuIa);
+    }
+
+    /** «servidor_ia», sólo desde la ventana: lo enciende (eligiendo la carpeta de la IA) o lo apaga. */
+    private Resultado servidorDeLaIa() {
+        if (servidorIa.enMarcha()) {
+            servidorIa.para();
+            miServidorIa.setSelected(false);
+            appendConsola("[ia] servidor para la IA, parado\n");
+            return Resultado.bien("parado");
+        }
+        IdePrefs pr = IdePrefs.load();
+        JFileChooser fc = new JFileChooser();
+        fc.setDialogTitle("La carpeta que puede tocar la IA");
+        fc.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+        File propuesta = pr.iaCarpeta != null ? new File(pr.iaCarpeta)
+                : currentProjectFile != null ? currentProjectFile.getParent().toFile()
+                : currentFile != null ? currentFile.getParent().toFile() : null;
+        if (propuesta != null && propuesta.isDirectory()) {
+            fc.setCurrentDirectory(propuesta.getParentFile() != null ? propuesta.getParentFile() : propuesta);
+            fc.setSelectedFile(propuesta);
+        }
+        if (fc.showDialog(this, "Elegir") != JFileChooser.APPROVE_OPTION || fc.getSelectedFile() == null) {
+            miServidorIa.setSelected(false);
+            return Resultado.bien("cancelado");
+        }
+        Path carpeta = fc.getSelectedFile().toPath().toAbsolutePath().normalize();
+        try {
+            servidorIa.arranca(pr.iaPuerto, carpeta);
+        } catch (IOException ex) {
+            miServidorIa.setSelected(false);
+            return Resultado.aviso("IA", "No se pudo poner el servidor para la IA en el puerto " + pr.iaPuerto + ":\n"
+                    + ex.getMessage(), JOptionPane.ERROR_MESSAGE);
+        }
+        pr.iaCarpeta = carpeta.toString();
+        pr.save();
+        miServidorIa.setSelected(true);
+        appendConsola("[ia] servidor para la IA en " + servidorIa.url() + " — su carpeta: " + carpeta + "\n"
+                + "[ia] para conectar Claude Code (una vez, en una terminal): " + ordenParaConectar() + "\n");
+        return Resultado.bien("en marcha en " + servidorIa.url());
+    }
+
+    private String ordenParaConectar() {
+        return "claude mcp add --transport http basicplus " + servidorIa.url();
+    }
+
+    /** «conectar_ia», sólo desde la ventana: dónde está, su carpeta y la orden para conectar Claude Code. */
+    private Resultado comoConectarLaIa() {
+        String texto;
+        if (servidorIa.enMarcha()) {
+            texto = "El servidor para la IA está en marcha en:\n   " + servidorIa.url()
+                    + "\n\nLa carpeta que puede tocar la IA:\n   " + servidorIa.carpeta()
+                    + "\n\nPara conectar Claude Code, una vez, en una terminal:\n   " + ordenParaConectar()
+                    + "\n\nCada comando del IDE es una herramienta (lo mismo que los menús y los botones);"
+                    + "\nlo que hace la IA sale en la consola, con «[ia]».";
+        } else {
+            texto = "El servidor para la IA está parado: se enciende en IA → Servidor para la IA (MCP)."
+                    + "\n\nAl encenderlo se elige la carpeta que puede tocar la IA; escucha sólo en este PC"
+                    + "\n(127.0.0.1, puerto " + IdePrefs.load().iaPuerto + ").";
+        }
+        JTextArea area = new JTextArea(texto);
+        area.setEditable(false);
+        area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        JOptionPane.showMessageDialog(this, new JScrollPane(area), "IA — cómo conectar", JOptionPane.PLAIN_MESSAGE);
+        return Resultado.bien("hecho");
+    }
+
     /** Cómo acabó el último programa ejecutado en el PC (su EXITED), para el resultado de «ejecutar». */
     private volatile edu.bpgenvm.vm.debug.ExitedEvent ultimoExited;
 
@@ -2564,103 +2649,169 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     private void registraComandos() {
+        // V9 H2.3 — cada uno con su explicación para la IA (la descripción de su herramienta) y el tipo de sus parámetros.
+        final String como = "si la pestaña activa aún no tiene fichero, la ruta del PC con la que guardarla antes";
         comandos.registra("nuevo", "New", p -> listo(nuevoFichero()))
-                .ayuda("Nuevo fichero");
+                .ayuda("Nuevo fichero")
+                .explica("Abre en el editor del IDE una pestaña nueva, vacía y sin fichero. (Para escribir un fuente,"
+                        + " escribe el fichero en el disco y ábrelo con «abrir».)");
         comandos.registra("abrir", "Load", this::abrir)
                 .ayuda("Abrir fichero")
-                .parametro("fichero", "la ruta del fichero .bp o .jc que abrir")
+                .explica("Abre en el editor del IDE un fuente del PC (.bp o .jc). Si ya estaba abierto, va a su"
+                        + " pestaña y, si el fichero cambió en el disco, lo relee (si su pestaña tiene cambios sin"
+                        + " guardar de quien usa el IDE, no lo relee y lo dice). Lo de la pestaña activa es lo que"
+                        + " compilan, ejecutan y depuran los demás comandos (o el main del proyecto, si hay uno"
+                        + " abierto).")
+                .parametro("fichero", "ruta", "la ruta del fichero .bp o .jc que abrir")
+                .necesita("fichero")
                 .pide(this::pideFicheroQueAbrir);
         comandos.registra("guardar", "Save", p -> listo(guardarYa(p)))
                 .ayuda("Guardar fichero")
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla")
+                .explica("Guarda la pestaña activa en su fichero, si tiene cambios. Si el fichero cambió en el disco"
+                        + " y la pestaña también, no pisa ninguno de los dos y lo dice.")
+                .parametro("como", "ruta", "si la pestaña aún no tiene fichero, la ruta del PC con la que guardarla")
                 .pide(this::pideNombreSiHaceFalta);
         comandos.registra("compilar", "Compile", p -> compilarOEjecutar(false, p))
                 .ayuda("Compilar")
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Compila a .mod el fuente de la pestaña activa (o el proyecto abierto). Devuelve los errores"
+                        + " (fichero, línea, columna, tipo y mensaje) y la salida del compilador.")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("ejecutar", "Run", p -> compilarOEjecutar(true, p))
                 .ayuda("Ejecutar (VM local)")
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Compila y ejecuta en el PC, en la VM Java (la de referencia), el fuente de la pestaña activa"
+                        + " (o el proyecto abierto). Acaba cuando acaba el programa: devuelve su código de salida"
+                        + " («codigo»: 0 si fue bien), su estado, lo que tardó, la traza si falló, los errores de la"
+                        + " compilación y la salida («salida»: lo que imprime el programa va ahí). Un programa a la vez.")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("parar", "Stop", p -> listo(parar()))
                 .ayuda("Parar (Ctrl+F2)")
+                .explica("Para el programa en marcha: el del PC (la VM local o la ventana de la VM-C) o el de la"
+                        + " placa.")
                 .atajo(KeyStroke.getKeyStroke("ctrl F2"));
 
         // -- La segunda tanda: el proyecto, construir, en la placa, con ventana, los DAO, traducir y la consola.
         comandos.registra("nuevo_proyecto", "New Project...", this::nuevoProyecto)
-                .parametro("carpeta", "la carpeta donde crearlo")
-                .parametro("nombre", "su nombre (el del módulo main)")
+                .explica("Crea un proyecto en «carpeta»: <nombre>.bpbuild, src/<nombre>.bp (un main que saluda), out/"
+                        + " y resources/; lo abre, y abre su main en el editor.")
+                .parametro("carpeta", "ruta", "la carpeta del PC donde crearlo")
+                .parametro("nombre", "su nombre (el del módulo main: letras, dígitos y _)")
+                .necesita("carpeta", "nombre")
                 .pide(this::pideNuevoProyecto);
         comandos.registra("abrir_proyecto", "Open Project...", this::abrirProyecto)
                 .corto("Open Proj.")
                 .ayuda("Abrir proyecto")
-                .parametro("proyecto", "la ruta del .bpbuild")
+                .explica("Abre un proyecto (su .bpbuild): desde entonces, compilar y ejecutar van con su main y"
+                        + " construir monta el proyecto entero.")
+                .parametro("proyecto", "ruta", "la ruta del .bpbuild")
+                .necesita("proyecto")
                 .pide(this::pideProyectoQueAbrir);
-        comandos.registra("cerrar_proyecto", "Close Project", p -> listo(cerrarProyecto()));
+        comandos.registra("cerrar_proyecto", "Close Project", p -> listo(cerrarProyecto()))
+                .explica("Cierra el proyecto abierto: se vuelve a trabajar con el fichero de la pestaña activa.");
         comandos.registra("anadir_recursos", "Add File to Resources...", this::anadirRecursos)
-                .parametro("ficheros", "las rutas de los ficheros que copiar a resources/ (una lista, o una)")
+                .explica("Copia ficheros del PC a resources/ del proyecto abierto (viajan a la placa con el programa).")
+                .parametro("ficheros", "rutas", "las rutas de los ficheros del PC que copiar")
+                .necesita("ficheros")
                 .pide(this::pideRecursos);
         comandos.registra("construir", "Build Project", p -> construir())
                 .corto("Build Proj")
-                .ayuda("Construir el proyecto (+ pack si out:pack)");
+                .ayuda("Construir el proyecto (+ pack si out:pack)")
+                .explica("Construye el proyecto abierto: compila todos sus fuentes y, si es out:pack, monta su pack."
+                        + " Devuelve los errores y la salida.");
         comandos.registra("ejecutar_placa", "Run on Device", this::ejecutarEnLaPlaca)
                 .ayuda("Ejecutar en placa")
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Compila el fuente de la pestaña activa (o el proyecto) y lo ejecuta en el dispositivo"
+                        + " conectado (una placa o el micro simulado; antes, «placa_conectar» o «micro_simulado»): sube"
+                        + " lo que haga falta, ejecuta, y acaba cuando acaba el programa en el dispositivo, con su"
+                        + " código de salida, su estado, los errores de la compilación y la salida.")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaLaPlaca);
         comandos.registra("ejecutar_ventana", "Run Window (VM-C)", this::ejecutarEnVentana)
                 .corto("Run Window")
                 .ayuda("Ver la ventana en el PC (VM-C nativa)")
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Compila y ejecuta en el PC con la VM-C y su ventana gráfica (la pantalla de una placa, en una"
+                        + " ventana del PC). Acaba cuando se cierra esa ventana: devuelve el código de salida y la"
+                        + " salida.")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("dao", "DAO build", p -> listo(daoBuild()))
-                .ayuda("Generar los DAO del proyecto a partir de las @BD");
+                .ayuda("Generar los DAO del proyecto a partir de las @BD")
+                .explica("Genera los DAO del proyecto abierto a partir de sus clases con @BD; devuelve lo generado, lo"
+                        + " que ya estaba al día y los avisos.");
         comandos.registra("traducir_jc", "Traducir a JC", p -> traducir(true, p))
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Traduce de BP a JC el fuente de la pestaña activa y lo abre en una pestaña nueva, sin"
+                        + " guardar; devuelve el texto traducido («texto»).")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaTraducir);
         comandos.registra("traducir_bp", "Traducir a BP", p -> traducir(false, p))
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Traduce de JC a BP el fuente de la pestaña activa y lo abre en una pestaña nueva, sin"
+                        + " guardar; devuelve el texto traducido («texto»).")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaTraducir);
         comandos.registra("limpiar_consola", "Clear console", p -> {
             consolaArea.setText("");
             errors.clear();
             return listo(Resultado.bien("consola limpia"));
-        });
+        }).explica("Vacía la consola del IDE y su tabla de errores.");
 
         // -- La edición, sobre las líneas de la selección del editor activo (o la del cursor).
+        final String sobreLaSeleccion = " las líneas seleccionadas en el editor (o la del cursor). Es para quien edita"
+                + " en el IDE: para cambiar un fuente, escribe el fichero.";
         comandos.registra("indentar", "Indent", p -> listo(editIndentSelection(true)))
-                .ayuda("Indentar selección");
+                .ayuda("Indentar selección")
+                .explica("Indenta" + sobreLaSeleccion);
         comandos.registra("desindentar", "Dedent", p -> listo(editIndentSelection(false)))
-                .ayuda("Des-indentar selección");
+                .ayuda("Des-indentar selección")
+                .explica("Des-indenta" + sobreLaSeleccion);
         comandos.registra("comentar", "Comment", p -> listo(editCommentSelection(true)))
-                .ayuda("Comentar selección");
+                .ayuda("Comentar selección")
+                .explica("Comenta con //" + sobreLaSeleccion);
         comandos.registra("descomentar", "Uncomment", p -> listo(editCommentSelection(false)))
-                .ayuda("Descomentar selección");
+                .ayuda("Descomentar selección")
+                .explica("Quita el // de" + sobreLaSeleccion);
 
         // -- La tercera tanda: el depurador. Depurar y las órdenes de paso acaban en la próxima parada (dónde, con sus
         //    locales, y la salida desde la orden) o en el fin del programa (su código).
+        final String parada = " Devuelve la próxima parada: dónde («fichero», «linea»), sus variables locales («locales»:"
+                + " nombre, tipo y valor) y lo que imprimió el programa desde la orden («salida»); o, si el programa"
+                + " acabó, «parado» = false con su código de salida.";
         comandos.registra("depurar", "Debug", this::depurar)
                 .ayuda("Depurar")
+                .explica("Compila y depura en el PC el fuente de la pestaña activa (o el proyecto): con puntos de"
+                        + " parada («punto_parada»), para en el primero; sin ninguno, en la primera línea que ejecuta."
+                        + parada + " Después: «continuar», «paso_sobre», «paso_dentro», «paso_fuera» o"
+                        + " «parar_depuracion».")
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F5, KeyEvent.SHIFT_DOWN_MASK))
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("depurar_placa", "Debug on Device", this::depurarEnLaPlaca)
-                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .explica("Lo de «depurar», en el dispositivo conectado (una placa o el micro simulado)." + parada)
+                .parametro("como", "ruta", como)
                 .pide(this::pideParaLaPlaca);
         comandos.registra("continuar", "Continue", p -> ordenAlDepurador(StepCommand.CONTINUE, "continuar"))
+                .explica("Depurando: sigue hasta el próximo punto de parada (o el fin)." + parada)
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F5, 0));
         comandos.registra("paso_sobre", "Step Over", p -> ordenAlDepurador(StepCommand.STEP_OVER, "paso_sobre"))
+                .explica("Depurando: un paso, sin entrar en las funciones que se llaman." + parada)
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F10, 0));
         comandos.registra("paso_dentro", "Step Into", p -> ordenAlDepurador(StepCommand.STEP_INTO, "paso_dentro"))
+                .explica("Depurando: un paso, entrando en la función que se llama." + parada)
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F11, 0));
         comandos.registra("paso_fuera", "Step Out", p -> ordenAlDepurador(StepCommand.STEP_OUT, "paso_fuera"))
+                .explica("Depurando: sigue hasta salir de la función actual." + parada)
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F11, KeyEvent.SHIFT_DOWN_MASK));
         comandos.registra("parar_depuracion", "Stop", p -> ordenAlDepurador(StepCommand.STOP, "parar_depuracion"))
+                .explica("Depurando: para el programa; devuelve su fin.")
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F5, KeyEvent.CTRL_DOWN_MASK));
         comandos.registra("punto_parada", "Toggle Breakpoint", p -> listo(puntoDeParada(p)))
+                .explica("Pone o quita un punto de parada en la línea «linea» del fuente «fichero» (su nombre, como en"
+                        + " el editor: «Main.bp»); con «poner», lo deja así. Vale antes de depurar y durante.")
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F9, 0))
-                .parametro("fichero", "el fichero (su nombre, como en el editor)")
-                .parametro("linea", "la línea")
-                .parametro("poner", "true lo pone y false lo quita; sin él, lo alterna (F9)")
+                .parametro("fichero", "el nombre del fuente, como en el editor (Main.bp)")
+                .parametro("linea", "numero", "la línea")
+                .parametro("poner", "sino", "true lo pone y false lo quita; sin él, lo alterna (F9)")
+                .necesita("fichero", "linea")
                 .pide(this::pideElPuntoDeParada);
 
         // -- Los que son su diálogo (una configuración, la gestión de la placa, la ayuda, salir): sólo desde la ventana.
@@ -2680,6 +2831,13 @@ public class FrmMain extends javax.swing.JFrame
                 .atajo(KeyStroke.getKeyStroke(KeyEvent.VK_F1, 0))
                 .soloVentana();
         comandos.registra("salir", "Exit", p -> enLaVentana(() -> jMenuItem3ActionPerformed(null))).soloVentana();
+        // V9 H2.3 — el servidor para la IA: encenderlo es de la ventana (Eduardo: «Un menú IA»).
+        comandos.registra("servidor_ia", "Servidor para la IA (MCP)", p -> listo(servidorDeLaIa()))
+                .ayuda("Encender o apagar el servidor por el que una IA maneja el IDE")
+                .soloVentana();
+        comandos.registra("conectar_ia", "Cómo conectar…", p -> listo(comoConectarLaIa()))
+                .ayuda("Dónde escucha el servidor para la IA y cómo conectar Claude Code")
+                .soloVentana();
     }
 
     /** La lógica de un comando que es su diálogo: lo abre (modal, en el EDT) y, al cerrarlo, «hecho». */
@@ -4028,6 +4186,8 @@ public class FrmMain extends javax.swing.JFrame
         }
         Process p = vmcProcess;
         if (p != null && p.isAlive()) p.destroyForcibly();
+        ServidorIa s = servidorIa;   // V9 H2.3: y el servidor para la IA, que no se quede escuchando
+        if (s != null) s.para();
     }
 
     /** P-run-stop (#257) — acción del menú Run → Stop. */

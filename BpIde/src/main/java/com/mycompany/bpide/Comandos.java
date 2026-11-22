@@ -46,6 +46,13 @@ public final class Comandos {
         private String ayuda;
         private KeyStroke atajo;
         private final Map<String, String> parametros = new LinkedHashMap<>();
+        /** V9 H2.3 — el tipo de cada parámetro (para el esquema de la IA): texto, numero, sino, lista, ruta (una del PC,
+         *  dentro de la carpeta de la IA) o rutas. */
+        private final Map<String, String> tipos = new LinkedHashMap<>();
+        /** V9 H2.3 — los que la IA tiene que pasar siempre (la ventana los saca de lo seleccionado). */
+        private final List<String> necesarios = new ArrayList<>();
+        /** V9 H2.3 — qué hace y qué devuelve, dicho para la IA (la descripción de su herramienta). */
+        private String explicacion;
         /** Lo que hace, en el EDT; el resultado, cuando acabe. */
         private final Function<Map<String, Object>, CompletableFuture<Resultado>> logica;
         /** Desde la ventana, lo que falta, por sus diálogos; null = el usuario lo canceló (no se hace nada). */
@@ -66,8 +73,29 @@ public final class Comandos {
         public Comando ayuda(String t) { this.ayuda = t; return this; }
         /** El atajo de teclado (el del menú). */
         public Comando atajo(KeyStroke k) { this.atajo = k; return this; }
-        /** Un parámetro que admite, con lo que es (lo lee la IA). */
-        public Comando parametro(String nombre, String queEs) { parametros.put(nombre, queEs); return this; }
+        /** Un parámetro que admite, con lo que es (lo lee la IA). Un texto. */
+        public Comando parametro(String nombre, String queEs) { return parametro(nombre, "texto", queEs); }
+
+        /** V9 H2.3 — un parámetro con su tipo: texto, numero, sino, lista, ruta (del PC: dentro de la carpeta de la IA)
+         *  o rutas. */
+        public Comando parametro(String nombre, String tipo, String queEs) {
+            if (!TIPOS.contains(tipo)) throw new IllegalArgumentException("tipo de parámetro desconocido: " + tipo);
+            parametros.put(nombre, queEs);
+            tipos.put(nombre, tipo);
+            return this;
+        }
+
+        /** V9 H2.3 — los parámetros que la IA tiene que pasar siempre. */
+        public Comando necesita(String... nombres) {
+            for (String n : nombres) {
+                if (!parametros.containsKey(n)) throw new IllegalArgumentException("'" + n + "' no es un parámetro de " + id);
+                necesarios.add(n);
+            }
+            return this;
+        }
+
+        /** V9 H2.3 — qué hace y qué devuelve, para la IA. */
+        public Comando explica(String t) { this.explicacion = t; return this; }
         /** Cómo pide la ventana lo que falta: devuelve los parámetros, o null si el usuario cancela. */
         public Comando pide(Supplier<Map<String, Object>> s) { this.pideALaVentana = s; return this; }
         /** El comando es su propio diálogo: llamado por su nombre, un resultado que lo dice (no abre nada). */
@@ -78,7 +106,19 @@ public final class Comandos {
         public String ayuda() { return ayuda; }
         public boolean esSoloVentana() { return soloVentana; }
         public Map<String, String> parametros() { return Collections.unmodifiableMap(parametros); }
+        /** V9 H2.3 — el tipo de un parámetro (texto si no se dijo). */
+        public String tipoDe(String nombre) { String t = tipos.get(nombre); return t != null ? t : "texto"; }
+        public List<String> necesarios() { return Collections.unmodifiableList(necesarios); }
+        /** V9 H2.3 — para la IA: su explicación; sin ella, la ayuda del botón o el texto del menú. */
+        public String explicacion() {
+            if (explicacion != null) return explicacion;
+            return ayuda != null ? ayuda : texto;
+        }
     }
+
+    /** V9 H2.3 — los tipos de los parámetros. */
+    static final java.util.Set<String> TIPOS = new java.util.HashSet<>(java.util.Arrays.asList(
+            "texto", "numero", "sino", "lista", "ruta", "rutas"));
 
     private final java.awt.Component ventana;
     private final Map<String, Comando> porId = new LinkedHashMap<>();

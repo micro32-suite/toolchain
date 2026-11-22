@@ -338,53 +338,84 @@ public final class PicoExplorer extends JPanel {
 
     private void registraComandos() {
         comandos.registra("placa_conectar", "Connect", this::conectar)
-                .parametro("conectar", "true conecta y false desconecta; sin él, alterna (como el botón)")
+                .explica("Conecta el IDE a un dispositivo: una placa por su puerto serie (tipo serie, donde COM7), por"
+                        + " la red (tipo red, donde su IP), la VM Java del PC (tipo vm, donde host:puerto) o el micro"
+                        + " simulado (tipo simulado; antes, arrancarlo con «micro_simulado»). Con conectar false,"
+                        + " desconecta. Devuelve a qué se conectó y su arquitectura; un puerto que no existe dice los"
+                        + " que hay.")
+                .parametro("conectar", "sino", "true conecta y false desconecta; sin él, alterna (como el botón)")
                 .parametro("tipo", "serie, red, vm o simulado (sin él, el que esté elegido en el panel)")
                 .parametro("donde", "el puerto (COM7), la IP de la placa o host:puerto de la VM Java; el simulado no"
                         + " lo lleva");
         comandos.registra("placa_buscar", "Buscar en la red", this::buscarPlacas)
                 .ayuda("Pregunta a toda la red qué placas hay")
+                .explica("Pregunta a la red local qué placas hay (las que tienen la WiFi encendida); devuelve cada una"
+                        + " con su nombre, su micro y su dirección («donde», para «placa_conectar» con tipo red).")
                 .pide(() -> { Map<String, Object> p = new HashMap<>(); p.put("elegir", true); return p; });
         comandos.registra("micro_simulado", "Micro simulado: arrancar o parar", this::microSimulado)
                 .ayuda("Arranca el micro simulado y se conecta a él")
-                .parametro("arrancar", "true lo arranca (y se conecta) y false lo para; sin él, alterna (como el"
-                        + " botón)");
+                .explica("Arranca el micro simulado (una placa que corre en el PC: la VM-C) y conecta el IDE a él; o lo"
+                        + " para. Al arrancarlo, devuelve lo de la conexión.")
+                .parametro("arrancar", "sino", "true lo arranca (y se conecta) y false lo para; sin él, alterna (como"
+                        + " el botón)");
         comandos.registra("simulado_config", "Configurar el micro simulado", p -> {
             onSimConfig();
             return listo(Resultado.bien("hecho"));
         }).ayuda("Configurar el micro simulado (RAM, flash, pantalla…)").soloVentana();
         comandos.registra("vm_java", "VM Java en este PC: arrancar o parar", this::laVmJava)
                 .ayuda("Arranca una VM Java en este PC, en el puerto del endpoint, y se conecta a ella")
-                .parametro("arrancar", "true la arranca (y se conecta) y false la para; sin él, alterna (como el botón)")
+                .explica("Arranca una VM Java en este PC como servidor del cable y conecta el IDE a ella; o la para."
+                        + " (Ejecutar en ella con «ejecutar_placa» aún no va: #865; para el PC, «ejecutar».)")
+                .parametro("arrancar", "sino", "true la arranca (y se conecta) y false la para; sin él, alterna (como"
+                        + " el botón)")
                 .parametro("donde", "localhost:puerto (sin él, el del panel)");
 
         // -- La 4b: los ficheros y la placa. Sin `fichero`, lo seleccionado en el árbol (lo que hace el botón).
-        comandos.registra("placa_refrescar", "Refresh", p -> refresca());
+        comandos.registra("placa_refrescar", "Refresh", p -> refresca())
+                .explica("Lista los ficheros del dispositivo conectado (ruta, tamaño, CRC y, si alguno no se cargaría,"
+                        + " por qué) y su memoria.");
         comandos.registra("placa_subir", "Upload…", this::subir)
-                .parametro("ficheros", "las rutas de los ficheros del PC que subir (una lista, o una)")
+                .explica("Sube ficheros del PC al dispositivo conectado. Devuelve cuántos subió y los que fallaron.")
+                .parametro("ficheros", "rutas", "las rutas de los ficheros del PC que subir")
                 .parametro("destino", "dónde, en la placa: con un fichero, su ruta (o una carpeta acabada en /); con"
                         + " varios, la carpeta (sin él, /app)")
+                .necesita("ficheros")
                 .pide(this::pideSubida);
         comandos.registra("placa_ejecutar", "Run", this::ejecutaFichero)
-                .parametro("fichero", "la ruta del .mod (o .pack) en la placa")
+                .explica("Ejecuta un programa (.mod o .pack) que YA está en el dispositivo; acaba cuando acaba, con su"
+                        + " código de salida, su estado y la salida. (Para compilar y ejecutar el fuente del IDE,"
+                        + " «ejecutar_placa».)")
+                .parametro("fichero", "la ruta del .mod (o .pack) en la placa (/app/Main.mod)")
+                .necesita("fichero")
                 .pide(this::pideLoSeleccionado);
         comandos.registra("placa_bajar", "Download…", this::bajar)
+                .explica("Baja un fichero del dispositivo a una ruta del PC.")
                 .parametro("fichero", "la ruta en la placa")
-                .parametro("destino", "la ruta del fichero en el PC donde dejarlo")
+                .parametro("destino", "ruta", "la ruta del fichero en el PC donde dejarlo")
+                .necesita("fichero", "destino")
                 .pide(this::pideBajada);
         comandos.registra("placa_editar", "Edit", p -> {
             onEdit();
             return listo(Resultado.bien("hecho"));
         }).soloVentana();
         comandos.registra("placa_borrar", "Delete", this::borrar)
-                .parametro("ficheros", "las rutas en la placa (una lista, o una)")
+                .explica("Borra ficheros del dispositivo. Devuelve cuántos borró y los que no, con su motivo.")
+                .parametro("ficheros", "lista", "las rutas en la placa")
+                .necesita("ficheros")
                 .pide(this::pideBorrado);
-        comandos.registra("placa_guardar", "Save", this::guardaElFs);
-        comandos.registra("placa_log", "Log", this::elLog);
-        comandos.registra("placa_borrar_log", "Clr Log", this::borraElLog);
+        comandos.registra("placa_guardar", "Save", this::guardaElFs)
+                .explica("Guarda el sistema de ficheros del dispositivo en su flash (en las placas que lo tienen en"
+                        + " RAM).");
+        comandos.registra("placa_log", "Log", this::elLog)
+                .explica("Lee el log persistente de la placa (en «log»).");
+        comandos.registra("placa_borrar_log", "Clr Log", this::borraElLog)
+                .explica("Borra el log persistente de la placa.");
         comandos.registra("placa_reiniciar", "Reset", this::reinicia)
+                .explica("Reinicia el dispositivo; la conexión se cierra (para seguir, «placa_conectar»).")
                 .pide(this::pideElReinicio);
-        comandos.registra("placa_info", "Info", this::elInfo);
+        comandos.registra("placa_info", "Info", this::elInfo)
+                .explica("El INFO del dispositivo conectado: su micro, la memoria, la flash, la arquitectura, la imagen…"
+                        + " («info», tal cual lo manda, y «texto», como lo enseña el IDE).");
         comandos.registra("placa_wifi", "WiFi", p -> {
             onWifi();
             return listo(Resultado.bien("hecho"));

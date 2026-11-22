@@ -39,6 +39,12 @@ public final class IdePrefs {
     /** V8/H3 — la última dirección de la placa por la red: la que se escribió, o la que dijo el INFO por el cable. */
     public String placaRed;
 
+    /** V9 H2.3 — el servidor para la IA (MCP): su puerto, en 127.0.0.1. */
+    public int    iaPuerto = 7340;
+    /** V9 H2.3 — la carpeta que puede tocar la IA (la que se eligió al encenderlo la última vez; Eduardo: «La que elijo
+     *  al encenderlo»). Null/empty = sin elegir aún. */
+    public String iaCarpeta;
+
     /** Última carpeta donde se abrió o guardó un fichero .bp.
      *  El JFileChooser arranca aquí en vez de en Documents para que el
      *  usuario no tenga que navegar de nuevo cada vez. */
@@ -228,6 +234,9 @@ public final class IdePrefs {
             p.vmHost  = Json.getString(m, "vmHost", null);
             p.vmPort  = (int) Json.getLong(m, "vmPort", 0);
             p.placaRed = Json.getString(m, "placaRed", null);
+            p.iaPuerto  = (int) Json.getLong(m, "iaPuerto", p.iaPuerto);   // V9 H2.3
+            p.iaCarpeta = Json.getString(m, "iaCarpeta", null);
+            if (p.iaCarpeta != null && p.iaCarpeta.isEmpty()) p.iaCarpeta = null;
             p.lastDir = Json.getString(m, "lastDir", null);
             p.lastUploadDir = Json.getString(m, "lastUploadDir", null);
             p.aotGccPath = Json.getString(m, "aotGccPath", null);
@@ -266,6 +275,8 @@ public final class IdePrefs {
         m.put("vmHost",  vmHost  == null ? "" : vmHost);
         m.put("vmPort",  (long) vmPort);
         m.put("placaRed", placaRed == null ? "" : placaRed);
+        m.put("iaPuerto", (long) iaPuerto);                       // V9 H2.3
+        m.put("iaCarpeta", iaCarpeta == null ? "" : iaCarpeta);
         m.put("lastDir", lastDir == null ? "" : lastDir);
         m.put("lastUploadDir", lastUploadDir == null ? "" : lastUploadDir);
         m.put("aotGccPath", aotGccPath == null ? "" : aotGccPath);
