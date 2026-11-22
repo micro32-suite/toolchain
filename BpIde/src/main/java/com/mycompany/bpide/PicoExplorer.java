@@ -1641,8 +1641,11 @@ public final class PicoExplorer extends JPanel {
                 outputSink.accept("[Explorer] VM finished: " + statusStr);
             }
             status.setText("Done: " + statusStr);
-            avisaFinDelRun(statusStr);
-            onRefresh();
+            /* V9 #868 — el fin, DESPUÉS del refresco del árbol (como subir y borrar, IDE-7). Avisando antes, quien
+             * esperaba el fin (el comando «ejecutar_placa», la IA) seguía con lo suyo mientras este LIST iba por el
+             * cable, y un «placa_refrescar» en seguida se cruzaba con él: la placa contestaba BUSY («ya hay un listado
+             * en curso») 15 veces de 20, y el IDE lo daba por un programa en marcha. */
+            refresca().whenComplete((x, ex) -> avisaFinDelRun(statusStr));
         }, motivo -> avisaFinDelRun("error: " + motivo));   // V9 H2.2: también si falla, después de que se pinte
     }
 
@@ -3216,11 +3219,14 @@ public final class PicoExplorer extends JPanel {
                     // GET y el LIST troceados (#495, paso 4: el árbol y abrir un
                     // fichero sí van; subir o borrar, no). Mensaje accionable en
                     // vez del error crudo del wire.
+                    /* V9 #868 — con lo que dice la placa: BUSY no es siempre un programa en marcha («ya hay un listado
+                     * en curso», «hay una subida a medias»…), y decir que lo es mandaba a pararlo sin haber nada. */
+                    final String porque = msg.replaceFirst("^VM error \\[BUSY\\]:\\s*", "");
                     if (msg.contains("BUSY")) {
-                        status.setText("placa ocupada (programa en ejecución)");
+                        status.setText("placa ocupada: " + porque);
                         if (outputSink != null) {
-                            outputSink.accept("[Placa] ocupada ejecutando un programa "
-                                    + "— 'kill' para abortarlo y recuperar el control");
+                            outputSink.accept("[Placa] ocupada: " + porque
+                                    + " — si es un programa en marcha, 'kill' lo aborta y devuelve el control");
                         }
                     } else {
                         status.setText("ERROR: " + msg);
@@ -3229,8 +3235,9 @@ public final class PicoExplorer extends JPanel {
                         }
                     }
                     if (onFailure != null) {
-                        onFailure.accept(msg.contains("BUSY") ? "la placa está ocupada ejecutando un programa (para"
-                                + " recuperar el control, parar)" : (msg.isEmpty() ? cause.toString() : msg));
+                        onFailure.accept(msg.contains("BUSY") ? "la placa está ocupada: " + porque + " (si es un"
+                                + " programa en marcha, «parar» lo para; si no, basta con repetirlo)"
+                                : (msg.isEmpty() ? cause.toString() : msg));
                     }
                 } finally {
                     setActionButtonsEnabled(true);

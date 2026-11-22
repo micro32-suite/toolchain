@@ -238,8 +238,9 @@ public final class ServidorIa {
                 + " simulado (una placa que corre en el PC): «placa_conectar» o «micro_simulado», y después"
                 + " «ejecutar_placa». Para depurar: «punto_parada», «depurar» y los pasos. Las rutas del PC, dentro de "
                 + carpeta + " (una relativa se toma desde ahí). Un programa a la vez; uno que no acaba (una GUI), se"
-                + " para con «parar». La documentación del lenguaje está en la carpeta docs de la instalación (el manual,"
-                + " la referencia y la guía del IDE).";
+                + " para con «parar». Con la placa, una herramienta cada vez, no varias a la vez: atiende un listado,"
+                + " una subida o una bajada cada vez, y a lo que llega a destiempo contesta «ocupada». La documentación"
+                + " del lenguaje está en la carpeta docs de la instalación (el manual, la referencia y la guía del IDE).";
     }
 
     private Map<String, Object> herramientas() {
