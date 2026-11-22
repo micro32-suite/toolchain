@@ -401,10 +401,12 @@ public class FrmMain extends javax.swing.JFrame
         consoleInputPanel.add(consolePromptLabel, BorderLayout.WEST);
         consoleInputPanel.add(consoleInput, BorderLayout.CENTER);
         // H12 — botón Clear a mano (la salida se acumula); limpia la consola.
-        javax.swing.JButton btnClearConsole = new javax.swing.JButton("Clear");
+        // V9 H2.2 — el comando «limpiar_consola», el del menú (la consola y la tabla de errores), con su texto y su
+        // ayuda de siempre. Antes este botón sólo vaciaba la consola.
+        javax.swing.JButton btnClearConsole = new javax.swing.JButton(comandos.accion("limpiar_consola"));
+        btnClearConsole.setText("Clear");
         btnClearConsole.setToolTipText("Limpiar la consola");
         btnClearConsole.setFocusable(false);
-        btnClearConsole.addActionListener(e -> consolaArea.setText(""));
         consoleInputPanel.add(btnClearConsole, BorderLayout.EAST);
         jPanel2.add(consoleInputPanel, BorderLayout.PAGE_END);
         consoleInput.addActionListener(e -> {
