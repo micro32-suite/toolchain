@@ -92,8 +92,79 @@ public class FrmMain extends javax.swing.JFrame
         final RSyntaxTextArea editor;
         final JScrollPane scroll;
         Path file;        // null = buffer sin guardar (p.ej. tab inicial)
+        /** V9 H2.3 (#866) — la pestaña tiene cambios que no están en el disco (la «*» del título). */
+        boolean modificado;
+        /** La fecha del fichero cuando se cargó o se guardó: si el del disco es otra, cambió FUERA del IDE. */
+        long enDisco;
+        /** Mientras se le pone el texto desde el programa (cargar, releer): eso no es un cambio de quien escribe. */
+        boolean cargando;
         OpenFile(RSyntaxTextArea editor, JScrollPane scroll, Path file) {
             this.editor = editor; this.scroll = scroll; this.file = file;
+        }
+    }
+
+    /* ── V9 H2.3 (Eduardo: «Sí, dentro del H2.3») — LO QUE CAMBIA FUERA DEL IDE, Y LO QUE NO SE HA GUARDADO ─────────────
+     * La IA cambia un fuente EN EL DISCO y pide compilar; si estaba abierto en una pestaña, compilar guardaba antes la
+     * pestaña —lo viejo— encima de lo nuevo, y compilaba lo viejo. Y el IDE no sabía qué pestañas tenían cambios sin
+     * guardar (#866: la «×» los tiraba sin preguntar). Ahora cada pestaña lo sabe: se guarda sólo lo modificado; lo que
+     * cambió fuera se relee si la pestaña no tiene cambios (al abrirlo, al compilar y al volver a la ventana); si los
+     * tiene Y cambió fuera, no se pisa ninguno de los dos (se pregunta en la ventana; a la IA, un resultado). */
+
+    /** La pestaña, vigilada: lo que se escribe en ella la marca como modificada. */
+    private OpenFile vigila(OpenFile of) {
+        of.editor.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            @Override public void insertUpdate(javax.swing.event.DocumentEvent e) { cambia(of); }
+            @Override public void removeUpdate(javax.swing.event.DocumentEvent e) { cambia(of); }
+            @Override public void changedUpdate(javax.swing.event.DocumentEvent e) { }   // atributos: no es el texto
+        });
+        if (of.file != null) of.enDisco = fechaEnDisco(of.file);
+        return of;
+    }
+
+    private void cambia(OpenFile of) {
+        if (of.cargando || of.modificado) return;
+        of.modificado = true;
+        ponMarca(of);
+    }
+
+    /** El título de la pestaña, con su «*» si tiene cambios sin guardar. */
+    private void ponMarca(OpenFile of) {
+        int idx = jTabbedPane1.indexOfComponent(of.scroll);
+        if (idx < 0) return;
+        String t = jTabbedPane1.getTitleAt(idx);
+        String base = (t != null && t.startsWith("*")) ? t.substring(1) : (t == null ? "" : t);
+        setTabTitle(of.scroll, of.modificado ? "*" + base : base);
+    }
+
+    private static long fechaEnDisco(Path f) {
+        try { return Files.getLastModifiedTime(f).toMillis(); } catch (IOException ex) { return 0; }
+    }
+
+    /** ¿Cambió el fichero FUERA del IDE desde que la pestaña lo cargó o lo guardó? */
+    private static boolean cambioFuera(OpenFile of) {
+        return of.file != null && Files.isRegularFile(of.file) && fechaEnDisco(of.file) != of.enDisco;
+    }
+
+    /** Relee la pestaña del disco (lo que cambió fuera): sin marca, y sin que deshacer vuelva a lo de antes. */
+    private void relee(OpenFile of) throws IOException {
+        String content = new String(Files.readAllBytes(of.file), StandardCharsets.UTF_8);
+        int caret = of.editor.getCaretPosition();
+        of.cargando = true;
+        try { of.editor.setText(content); } finally { of.cargando = false; }
+        of.editor.setCaretPosition(Math.min(caret, content.length()));
+        of.editor.discardAllEdits();
+        of.modificado = false;
+        of.enDisco = fechaEnDisco(of.file);
+        ponMarca(of);
+    }
+
+    /** Al volver a la ventana: las pestañas sin cambios cuyo fichero cambió fuera, releídas (lo que escribió la IA, a la
+     *  vista). Las que tienen cambios, como están (al guardarlas o al compilar, se pregunta). */
+    private void releeLoQueCambioFuera() {
+        for (OpenFile of : new ArrayList<>(openFiles.values())) {
+            if (!of.modificado && cambioFuera(of)) {
+                try { relee(of); } catch (IOException ignored) { /* se queda como está */ }
+            }
         }
     }
     private final java.util.Map<java.awt.Component, OpenFile> openFiles = new java.util.HashMap<>();
@@ -145,12 +216,16 @@ public class FrmMain extends javax.swing.JFrame
      */
     public FrmMain() {
         initComponents();
-        this.setDefaultCloseOperation(DISPOSE_ON_CLOSE);
+        /* V9 H2.3 (#866) — cerrar la ventana pregunta si hay pestañas sin guardar (puedeSalir): el cierre, a mano. */
+        this.setDefaultCloseOperation(DO_NOTHING_ON_CLOSE);
         /* V8 #822 (14-nov) — al cerrar el IDE, lo que tenga en marcha en el PC se para: la VM local (su cliente la mata al
          * cerrarse) y la VM-C de Run Window. Antes seguían vivas, sin ventana y sin nadie que las parara. Al cerrar la
          * ventana, y por si la JVM se va sin cerrarla, también al salir. */
         addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowClosing(java.awt.event.WindowEvent e) { if (puedeSalir()) dispose(); }
             @Override public void windowClosed(java.awt.event.WindowEvent e) { paraLoQueHayaEnElPc(); }
+            // V9 H2.3 — al volver a la ventana, lo que cambió fuera (lo que escribe la IA), a la vista
+            @Override public void windowActivated(java.awt.event.WindowEvent e) { releeLoQueCambioFuera(); }
         });
         Runtime.getRuntime().addShutdownHook(new Thread(this::paraLoQueHayaEnElPc, "ide-para-lo-del-pc"));
         FrmMain.form=this;
@@ -286,9 +361,26 @@ public class FrmMain extends javax.swing.JFrame
     }// </editor-fold>//GEN-END:initComponents
 
     private void jMenuItem3ActionPerformed(java.awt.event.ActionEvent evt) {//GEN-FIRST:event_jMenuItem3ActionPerformed
-        // TODO add your handling code here:
-        if (FrmMain.form!=null)  FrmMain.form.dispose();
+        // V9 H2.3 (#866): con pestañas sin guardar, se pregunta antes.
+        if (FrmMain.form != null && FrmMain.form.puedeSalir()) FrmMain.form.dispose();
     }//GEN-LAST:event_jMenuItem3ActionPerformed
+
+    /** V9 H2.3 (#866) — al salir, si hay pestañas con cambios sin guardar, se pregunta (antes se perdían). */
+    private boolean puedeSalir() {
+        List<String> nombres = new ArrayList<>();
+        for (int i = 0; i < jTabbedPane1.getTabCount(); i++) {
+            OpenFile of = openFiles.get(jTabbedPane1.getComponentAt(i));
+            if (of != null && of.modificado) {
+                nombres.add(of.file != null ? of.file.getFileName().toString()
+                                            : jTabbedPane1.getTitleAt(i).replaceFirst("^\\*", ""));
+            }
+        }
+        if (nombres.isEmpty()) return true;
+        int r = JOptionPane.showConfirmDialog(this, "Hay pestañas con cambios sin guardar:\n   "
+                + String.join("\n   ", nombres) + "\n\n¿Salir y perderlos?", "Salir",
+                JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
+        return r == JOptionPane.YES_OPTION;
+    }
 
     /**
      * @param args the command line arguments
@@ -353,7 +445,7 @@ public class FrmMain extends javax.swing.JFrame
         editorArea = newEditorPane();
         JScrollPane initialScroll = new RTextScrollPane(editorArea);
         jTabbedPane1.addTab("(sin abrir)", initialScroll);
-        OpenFile initial = new OpenFile(editorArea, initialScroll, null);
+        OpenFile initial = vigila(new OpenFile(editorArea, initialScroll, null));   // V9 H2.3: su marca de modificado
         openFiles.put(initialScroll, initial);
         installTabCloseButton(initialScroll, "(sin abrir)");
 
@@ -1553,8 +1645,11 @@ public class FrmMain extends javax.swing.JFrame
         int punto = nombre.lastIndexOf('.');
         String title = "(" + (punto > 0 ? nombre.substring(0, punto) : nombre) + (aJc ? ".jc" : ".bp") + ", sin guardar)";
         jTabbedPane1.addTab(title, sc);
-        openFiles.put(sc, new OpenFile(ed, sc, null));
+        OpenFile traduccion = vigila(new OpenFile(ed, sc, null));
+        openFiles.put(sc, traduccion);
         installTabCloseButton(sc, title);
+        traduccion.modificado = true;   // V9 H2.3: nace con contenido que no está en ningún fichero
+        ponMarca(traduccion);
         jTabbedPane1.setSelectedComponent(sc);
         refreshActiveTab();
     }
@@ -1632,6 +1727,25 @@ public class FrmMain extends javax.swing.JFrame
      */
     private void closeTabAt(int idx) {
         if (idx < 0 || idx >= jTabbedPane1.getTabCount()) return;
+        /* V9 H2.3 (#866) — con cambios sin guardar, se pregunta: antes se tiraban sin más. */
+        OpenFile cerrando = openFiles.get(jTabbedPane1.getComponentAt(idx));
+        if (cerrando != null && cerrando.modificado) {
+            String nombre = cerrando.file != null ? cerrando.file.getFileName().toString()
+                                                  : jTabbedPane1.getTitleAt(idx).replaceFirst("^\\*", "");
+            int r = JOptionPane.showConfirmDialog(this, "«" + nombre + "» tiene cambios sin guardar."
+                    + "\n¿Guardarlos antes de cerrar?", "Cerrar", JOptionPane.YES_NO_CANCEL_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (r != JOptionPane.YES_OPTION && r != JOptionPane.NO_OPTION) return;   // Cancelar: no se cierra
+            if (r == JOptionPane.YES_OPTION) {
+                jTabbedPane1.setSelectedIndex(idx);
+                refreshActiveTab();
+                CompletableFuture<Resultado> g = comandos.desdeLaVentana("guardar");
+                Resultado hecho = (g != null) ? g.getNow(null) : null;
+                if (hecho == null || !hecho.ok) return;   // no se guardó (cancelado o falló): no se cierra
+                idx = jTabbedPane1.indexOfComponent(cerrando.scroll);
+                if (idx < 0) return;
+            }
+        }
         java.awt.Component comp = jTabbedPane1.getComponentAt(idx);
         openFiles.remove(comp);
         jTabbedPane1.remove(idx);
@@ -1642,7 +1756,7 @@ public class FrmMain extends javax.swing.JFrame
             RSyntaxTextArea ed = newEditorPane();
             JScrollPane sc = new RTextScrollPane(ed);
             jTabbedPane1.addTab("(sin abrir)", sc);
-            openFiles.put(sc, new OpenFile(ed, sc, null));
+            openFiles.put(sc, vigila(new OpenFile(ed, sc, null)));
             installTabCloseButton(sc, "(sin abrir)");
             jTabbedPane1.setSelectedComponent(sc);
         } else {
@@ -1674,8 +1788,22 @@ public class FrmMain extends javax.swing.JFrame
             // 1) ¿ya abierto?
             for (java.util.Map.Entry<java.awt.Component, OpenFile> e : openFiles.entrySet()) {
                 if (file.equals(e.getValue().file)) {
+                    OpenFile ya = e.getValue();
                     jTabbedPane1.setSelectedComponent(e.getKey());
                     refreshActiveTab();
+                    /* V9 H2.3 — lo que cambió fuera (la IA lo acaba de escribir), releído si la pestaña no tiene
+                     * cambios; si los tiene, no se tira nada: se dice. */
+                    if (cambioFuera(ya)) {
+                        if (ya.modificado) {
+                            return Resultado.aviso("Abrir", file.getFileName() + " ha cambiado fuera del IDE, y su"
+                                    + " pestaña tiene cambios sin guardar:\nno se relee (se perderían). Guárdala, o"
+                                    + " ciérrala sin guardar y ábrelo otra vez.", JOptionPane.WARNING_MESSAGE)
+                                    .con("fichero", file.toString());
+                        }
+                        relee(ya);
+                        return Resultado.bien("releído (había cambiado fuera del IDE): " + file)
+                                .con("fichero", file.toString());
+                    }
                     return Resultado.bien("ya estaba abierto: " + file).con("fichero", file.toString());
                 }
             }
@@ -1694,8 +1822,12 @@ public class FrmMain extends javax.swing.JFrame
             if (recycle != null) {
                 recycle.file = file;
                 recycle.editor.setSyntaxEditingStyle(estiloPara(file));   // V8 #698: BP o JC
-                recycle.editor.setText(content);
+                recycle.cargando = true;                                  // V9 H2.3: cargar no es cambiar
+                try { recycle.editor.setText(content); } finally { recycle.cargando = false; }
                 recycle.editor.setCaretPosition(0);
+                recycle.editor.discardAllEdits();
+                recycle.modificado = false;
+                recycle.enDisco = fechaEnDisco(file);
                 setTabTitle(recycle.scroll, file.getFileName().toString());
                 jTabbedPane1.setSelectedComponent(recycle.scroll);
             } else {
@@ -1704,10 +1836,11 @@ public class FrmMain extends javax.swing.JFrame
                 ed.setSyntaxEditingStyle(estiloPara(file));   // V8 #698: BP o JC
                 ed.setText(content);
                 ed.setCaretPosition(0);
+                ed.discardAllEdits();                         // V9 H2.3: deshacer no vuelve a la pestaña vacía
                 JScrollPane sc = new RTextScrollPane(ed);
                 String title = file.getFileName().toString();
                 jTabbedPane1.addTab(title, sc);
-                openFiles.put(sc, new OpenFile(ed, sc, file));
+                openFiles.put(sc, vigila(new OpenFile(ed, sc, file)));
                 installTabCloseButton(sc, title);
                 jTabbedPane1.setSelectedComponent(sc);
             }
@@ -2584,6 +2717,27 @@ public class FrmMain extends javax.swing.JFrame
     private Map<String, Object> pideNombreSiHaceFalta() {
         Map<String, Object> p = new HashMap<>();
         OpenFile of = openFiles.get(jTabbedPane1.getSelectedComponent());
+        if (of != null && of.file != null && of.modificado && cambioFuera(of)) {
+            /* V9 H2.3 — el fichero cambió fuera (la IA) y la pestaña tiene cambios: lo decide quien mira. */
+            Object[] opciones = { "Guardar la pestaña encima", "Releer del disco", "Cancelar" };
+            int r = JOptionPane.showOptionDialog(this, of.file.getFileName() + " ha cambiado fuera del IDE, y su"
+                    + " pestaña tiene cambios sin guardar.\n\n«Guardar la pestaña encima» pierde lo de fuera;"
+                    + " «Releer del disco» pierde los cambios de la pestaña.", "Guardar", JOptionPane.YES_NO_CANCEL_OPTION,
+                    JOptionPane.WARNING_MESSAGE, null, opciones, opciones[2]);
+            if (r == 0) {
+                p.put("sobrescribir", true);
+            } else if (r == 1) {
+                try { relee(of); }
+                catch (IOException ex) {
+                    JOptionPane.showMessageDialog(this, "No se pudo releer " + of.file + ": " + ex.getMessage(),
+                            "Error", JOptionPane.ERROR_MESSAGE);
+                    return null;
+                }
+            } else {
+                return null;
+            }
+            return p;
+        }
         if (of == null || of.file != null) return p;
         JFileChooser fc = new JFileChooser();
         fc.setFileFilter(new FileNameExtensionFilter("BasicPlus (*.bp, *.jc)", "bp", "jc"));
@@ -2641,7 +2795,7 @@ public class FrmMain extends javax.swing.JFrame
         JScrollPane sc = new RTextScrollPane(ed);
         String title = "(nuevo)";
         jTabbedPane1.addTab(title, sc);
-        openFiles.put(sc, new OpenFile(ed, sc, null));
+        openFiles.put(sc, vigila(new OpenFile(ed, sc, null)));
         installTabCloseButton(sc, title);
         jTabbedPane1.setSelectedComponent(sc);
         refreshActiveTab();
@@ -2672,9 +2826,31 @@ public class FrmMain extends javax.swing.JFrame
             of.editor.setSyntaxEditingStyle(estiloPara(of.file));
             currentFile = of.file;
             rememberLastDir(chosen.getParentFile());
+        } else if (!of.modificado) {
+            /* V9 H2.3 — nada que guardar: la pestaña ES lo del disco. Y si cambió fuera (la IA lo acaba de escribir),
+             * se relee: lo nuevo es lo de fuera, y guardar la pestaña lo pisaba con lo viejo. */
+            if (cambioFuera(of)) {
+                try {
+                    relee(of);
+                } catch (IOException ex) {
+                    return Resultado.aviso("Error", "No se pudo releer " + of.file + ": " + ex.getMessage(),
+                            JOptionPane.ERROR_MESSAGE);
+                }
+                return Resultado.bien("sin cambios que guardar; releído (había cambiado fuera del IDE): " + of.file)
+                        .con("fichero", of.file.toString());
+            }
+            return Resultado.bien("sin cambios que guardar: " + of.file).con("fichero", of.file.toString());
+        } else if (cambioFuera(of) && !Boolean.TRUE.equals(p.get("sobrescribir"))) {
+            /* V9 H2.3 — cambió fuera Y la pestaña tiene cambios: no se pisa ninguno de los dos. La ventana lo pregunta
+             * antes (pideNombreSiHaceFalta: guardar encima, releer o nada); quien llama por el nombre, esto. */
+            return Resultado.aviso("Guardar", of.file.getFileName() + " ha cambiado fuera del IDE, y su pestaña tiene"
+                    + " cambios sin guardar:\nno se guarda, para no pisar ninguno de los dos.",
+                    JOptionPane.WARNING_MESSAGE).con("fichero", of.file.toString());
         }
         try {
             Files.write(of.file, of.editor.getText().getBytes(StandardCharsets.UTF_8));
+            of.modificado = false;                     // V9 H2.3
+            of.enDisco = fechaEnDisco(of.file);
             setTabTitle(of.scroll, of.file.getFileName().toString());
             setTitle(titulo(String.valueOf(of.file)));
             if (lblStatusFile != null) lblStatusFile.setText(of.file.toString());
