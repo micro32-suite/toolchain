@@ -37,7 +37,48 @@ class AotImportsTest {
         "end X", "");
 
     @AfterEach
-    void limpia() { Main.STDLIB_DIR = null; }
+    void limpia() { Main.STDLIB_DIR = null; Main.setPacksDir(null); }
+
+    /** El `Stdlib.pack` de BasicPlus (`packs/`), visto desde el cwd del test (`toolchain/lexer-java/`). */
+    private static Path stdlibPack() {
+        Path p = java.nio.file.Paths.get("..", "..", "packs", "Stdlib.pack").toAbsolutePath().normalize();
+        assertTrue(Files.exists(p), "falta " + p);
+        return p;
+    }
+
+    @Test @DisplayName("V9 #847 (b): un import que sólo viaja en un pack — el AOT lo busca en los packs, como el compilador")
+    void importQueSoloViajaEnUnPack(@TempDir Path tmp) throws Exception {
+        Main.STDLIB_DIR = null;                                   // ni la stdlib en disco: Core y Gpio, sólo en el pack
+        Main.setPacksDir(stdlibPack().getParent().toString());
+        Path bp = escribe(tmp, "X", NATIVA.replace("  import Core", "  import Core\n  import Gpio"));
+        AotMain.AotResult r = AotMain.emitAotC(bp, tmp.resolve("out"), true);
+        assertNotNull(r.cFile, "X tiene una native y sus imports están en un pack: debe emitir C");
+        assertTrue(Files.exists(r.cFile));
+    }
+
+    @Test @DisplayName("V9 #847 (b): `import Gpio from pack Stdlib` — el pack que dice el import")
+    void importDeUnPackConNombre(@TempDir Path tmp) throws Exception {
+        Main.STDLIB_DIR = null;
+        Main.setPacksDir(stdlibPack().getParent().toString());
+        Path bp = escribe(tmp, "X", NATIVA.replace("  import Core", "  import Core\n  import Gpio from pack Stdlib"));
+        AotMain.AotResult r = AotMain.emitAotC(bp, tmp.resolve("out"), true);
+        assertNotNull(r.cFile, "debe emitir C");
+    }
+
+    @Test @DisplayName("V9 #847 (b): dos packs traen el mismo módulo — no se elige: error con los dos")
+    void dosPacksTraenElMismo(@TempDir Path tmp) throws Exception {
+        Main.STDLIB_DIR = null;
+        Path packs = Files.createDirectories(tmp.resolve("packs"));
+        Files.copy(stdlibPack(), packs.resolve("Uno.pack"));
+        Files.copy(stdlibPack(), packs.resolve("Otro.pack"));
+        Main.setPacksDir(packs.toString());
+        Path bp = escribe(tmp, "X", NATIVA);
+        AotMain.ImportsFaltanException ex = assertThrows(AotMain.ImportsFaltanException.class,
+                () -> AotMain.emitAotC(bp, tmp.resolve("out"), true));
+        assertTrue(ex.getMessage().contains("lo traen 2 packs"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("Uno.pack") && ex.getMessage().contains("Otro.pack"), ex.getMessage());
+        assertFalse(Files.exists(tmp.resolve("out").resolve("aot_X.c")), "no debe emitir C eligiendo uno a ciegas");
+    }
 
     private static Path escribe(Path dir, String modulo, String fuente) throws Exception {
         Path bp = dir.resolve(modulo + ".bp");

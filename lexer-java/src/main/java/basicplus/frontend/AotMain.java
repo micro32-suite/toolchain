@@ -213,6 +213,7 @@ public final class AotMain {
         Main.injectImplicitCoreImport(module);
         Main.injectImplicitCollectionsImport(module);
         try {
+            Main.interfacesDeLosPacks(module, src, ctx);   // V9 #847 (b): lo que sólo viaja en un pack, como el compilador
             Main.loadImportsForAnalyzer(module, src, ctx, analyzer, 0);
         } catch (Exception impEx) {
             throw new ImportsFaltanException("los imports de " + src.getFileName() + " no cargan: " + impEx.getMessage());

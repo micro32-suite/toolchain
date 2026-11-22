@@ -1417,16 +1417,7 @@ public final class Main {
                                       moduleName, ifaceCacheKey, ctx, depth);
                 return;
             }
-            if (traen.size() > 1) {
-                /* Con la RUTA de cada uno: el nombre a secas no basta para
-                 * decidir, y si además coincidieran, el mensaje parecería roto. */
-                StringBuilder cuales = new StringBuilder();
-                for (Path p : traen) cuales.append("\n    ").append(p);
-                throw new IOException("el módulo '" + moduleName + "' lo traen " + traen.size()
-                        + " packs instalados:" + cuales
-                        + "\n  Di cuál quieres: `import " + moduleName
-                        + " from pack <NombreDelPack>`.");
-            }
+            if (traen.size() > 1) throw variosPacks(moduleName, traen);
         }
 
         // 3) Compila la interfaz desde el .bp source.
@@ -2336,6 +2327,52 @@ public final class Main {
         ctx.totalErrors++;
         ctx.importsQueFaltan.add(msg);
         indent(depth); System.err.println("error: " + msg);
+    }
+
+    /** V5 — dos packs traen el mismo módulo: no se elige, se dice. Con la RUTA de cada uno: el nombre a secas no
+     *  basta para decidir, y si además coincidieran, el mensaje parecería roto. Lo usan el paso 2b del compilador y
+     *  el AOT ({@link #interfacesDeLosPacks}): el mismo texto para el mismo caso. */
+    private static IOException variosPacks(String moduleName, java.util.List<Path> traen) {
+        StringBuilder cuales = new StringBuilder();
+        for (Path p : traen) cuales.append("\n    ").append(p);
+        return new IOException("el módulo '" + moduleName + "' lo traen " + traen.size()
+                + " packs instalados:" + cuales
+                + "\n  Di cuál quieres: `import " + moduleName + " from pack <NombreDelPack>`.");
+    }
+
+    /**
+     * V9 #847 (b) — los packs, para el AOT. El compilador prepara cada import antes de analizar
+     * ({@link #ensureInterfaceForImport}), y ahí mira los packs: el `import X from pack P`, y el paso 2b (V5, «nada
+     * suelto»), si el módulo no está en disco ni tiene fuente. El AOT no pasa por esa preparación —no compila nada,
+     * sólo lee interfaces— y no veía un módulo que sólo viaja en un pack (`SQLite` en el ZIP): sus natives corrían
+     * interpretadas, con el aviso de que faltaba. Esto son esos dos pasos, con las mismas funciones y la misma lista
+     * de carpetas; la interfaz va a la caché, donde {@link #loadImportsForAnalyzer} la encuentra. Lo demás (el disco,
+     * el error con su nombre si no está en ningún sitio, #542), como estaba.
+     */
+    static void interfacesDeLosPacks(Ast.ModuleNode module, Path importerSrc, Ctx ctx) throws IOException {
+        if (module.imports == null) return;
+        Path importerDir = importerSrc.toAbsolutePath().getParent();
+        for (Ast.ImportNode imp : module.imports) {
+            if (imp.packNativoMarca != null || imp.boundImpl != null) continue;
+            String library = libraryFromImportPath(imp);
+            String moduleName = imp.path.get(imp.path.size() - 1);
+            String cacheKey = library.isEmpty() ? moduleName : library + "." + moduleName;
+            if (ctx.interfaceCache.containsKey(cacheKey)) continue;
+            if (imp.packName != null) {                   // el pack que dice el import
+                loadInterfaceFromPack(imp, moduleName, cacheKey, ctx, 0);
+                continue;
+            }
+            if (!library.isEmpty()) continue;             // como el 2b: sólo los imports sin librería
+            if (locateImportBpi(imp, moduleName + ".bpi", library, moduleName, importerDir, ctx) != null) continue;
+            if (locateImportMod(imp, moduleName + ".mod", importerDir, ctx) != null) continue;   // en disco
+            if (locateBpSource(joinPath(imp.path), library, moduleName, imp.fromPath, importerSrc, ctx) != null)
+                continue;                                 // con fuente, manda la tuya (y su error, si no se compiló)
+            java.util.List<Path> traen = packsQueTraen(moduleName, ctx);
+            if (traen.size() == 1)
+                cargarInterfazDelPack(traen.get(0), traen.get(0).getFileName().toString(), moduleName, cacheKey, ctx, 0);
+            else if (traen.size() > 1)
+                throw variosPacks(moduleName, traen);
+        }
     }
 
     static void loadImportsForAnalyzer(Ast.ModuleNode module, Path importerSrc, Ctx ctx,
