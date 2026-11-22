@@ -24,7 +24,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.net.URI;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import javax.swing.BorderFactory;
@@ -496,12 +501,15 @@ public class FrmMain extends javax.swing.JFrame
             }
         });
 
+        // V9 H2.2 — los comandos del IDE (Comandos): el menú y el botón, la misma Action de cada uno.
+        comandos = new Comandos(this);
+        registraComandos();
+
         // -- Menú File: New / Load / Save / Recent Files. --
-        JMenuItem miNewFile = new JMenuItem("New");   // H12 (#259)
-        miNewFile.addActionListener(e -> onNewFile());
+        JMenuItem miNewFile = new JMenuItem(comandos.accion("nuevo"));   // H12 (#259)
         jMenu1.insert(miNewFile, 0);
-        jMenuItem1.addActionListener(e -> onLoad());
-        jMenuItem2.addActionListener(e -> onSave());
+        jMenuItem1.setAction(comandos.accion("abrir"));
+        jMenuItem2.setAction(comandos.accion("guardar"));
         recentFilesMenu = new javax.swing.JMenu("Recent Files");
         jMenu1.insert(recentFilesMenu, 3);   // New, Load, Save, [Recent], sep, Exit
         rebuildRecentFilesMenu();
@@ -518,23 +526,19 @@ public class FrmMain extends javax.swing.JFrame
         setupProjectMenu();
 
         // -- Menú Run: Compile, Run, Clear. --
-        JMenuItem miCompile = new JMenuItem("Compile");
-        miCompile.addActionListener(e -> doRun(false));
+        JMenuItem miCompile = new JMenuItem(comandos.accion("compilar"));
         jMenu3.add(miCompile);
 
         JMenuItem miBuild = new JMenuItem("Build Project");   // H3: compila el proyecto + monta el pack (out:pack)
         miBuild.addActionListener(e -> doBuildProject());
         jMenu3.add(miBuild);
 
-        JMenuItem miRun = new JMenuItem("Run");
-        miRun.addActionListener(e -> doRun(true));
+        JMenuItem miRun = new JMenuItem(comandos.accion("ejecutar"));
         jMenu3.add(miRun);
 
         // P-run-stop (#257) — aborta el programa en ejecución (local o
-        // placa) sin reiniciar nada: manda KILL por el wire.
-        JMenuItem miStop = new JMenuItem("Stop");
-        miStop.setAccelerator(KeyStroke.getKeyStroke("ctrl F2"));
-        miStop.addActionListener(e -> onStopRun());
+        // placa) sin reiniciar nada: manda KILL por el wire. (Su atajo, Ctrl+F2, lo lleva el comando.)
+        JMenuItem miStop = new JMenuItem(comandos.accion("parar"));
         jMenu3.add(miStop);
 
         JMenuItem miRunOnPico = new JMenuItem("Run on Device");
@@ -596,9 +600,9 @@ public class FrmMain extends javax.swing.JFrame
         tb.setBorder(javax.swing.BorderFactory.createEmptyBorder(4, 6, 4, 6));
 
         // -- Izquierda: archivos / proyecto.
-        group(tb, toolButton("Load",       "Abrir fichero",   e -> onLoad()),
-                  toolButton("Save",       "Guardar fichero", e -> onSave()),
-                  toolButton("New",        "Nuevo fichero",   e -> onNewFile()),
+        group(tb, toolButton("abrir"),
+                  toolButton("guardar"),
+                  toolButton("nuevo"),
                   toolButton("Open Proj.", "Abrir proyecto",  e -> onOpenProject()));
 
         /* #395 — el estado inicial: al arrancar no hay proyecto, asi que el
@@ -608,9 +612,9 @@ public class FrmMain extends javax.swing.JFrame
         tb.add(javax.swing.Box.createHorizontalGlue());
 
         // -- Centro: ejecución.
-        group(tb, toolButton("Compile",       "Compilar",            e -> doRun(false)),
+        group(tb, toolButton("compilar"),
                   toolButton("Build Proj",    "Construir el proyecto (+ pack si out:pack)", e -> doBuildProject()),
-                  toolButton("Run",           "Ejecutar (VM local)", e -> doRun(true)),
+                  toolButton("ejecutar"),
                   toolButton("Run Window",    "Ver la ventana en el PC (VM-C nativa)", e -> doRunWindow()),
                   toolButton("Run on Device", "Ejecutar en placa",   e -> doRunOnPico()),
                   toolButton("Placa",         "Gestión de placa (particiones + packs)", e -> openBoardManager()),
@@ -618,7 +622,7 @@ public class FrmMain extends javax.swing.JFrame
                   btnDaoBuild = toolButton("DAO build", "Generar los DAO del proyecto a partir de las @BD",
                                            e -> doDaoBuild()),
                   toolButton("Debug",         "Depurar",             e -> doDebug()),
-                  toolButton("Stop",          "Parar (Ctrl+F2)",     e -> onStopRun()));
+                  toolButton("parar"));
 
         tb.add(javax.swing.Box.createHorizontalGlue());
 
@@ -645,6 +649,17 @@ public class FrmMain extends javax.swing.JFrame
         b.setToolTipText(tip);
         b.setBackground(new java.awt.Color(214, 223, 237));
         b.addActionListener(action);
+        return b;
+    }
+
+    /** V9 H2.2 — el botón de la barra de un comando: su Action (la misma que la del menú), con el texto corto de la
+     *  barra y la ayuda del comando. */
+    private javax.swing.JButton toolButton(String idComando) {
+        Comandos.Comando c = comandos.get(idComando);
+        RoundToolButton b = new RoundToolButton(c.textoCorto());
+        b.setAction(comandos.accion(idComando));
+        b.setText(c.textoCorto());   // la Action le pone el texto del menú; la barra lleva el suyo
+        b.setBackground(new java.awt.Color(214, 223, 237));
         return b;
     }
 
@@ -1429,15 +1444,20 @@ public class FrmMain extends javax.swing.JFrame
     /** V8 #698 — con el main en `.bp` y en `.jc` a la vez, el proyecto no adivina cuál: se dice, y no se compila
      *  (como `Main.buildProject`). Va antes de tocar nada, al principio de cada orden. */
     private boolean mainDosVeces() {
-        if (currentProject == null) return false;
+        String motivo = motivoMainDosVeces();
+        if (motivo == null) return false;
+        JOptionPane.showMessageDialog(this, motivo, "Proyecto", JOptionPane.WARNING_MESSAGE);
+        return true;
+    }
+
+    /** V9 H2.2 — lo de mainDosVeces sin el diálogo (para los comandos): el motivo, o null si no pasa. */
+    private String motivoMainDosVeces() {
+        if (currentProject == null) return null;
         java.nio.file.Path bp = java.nio.file.Paths.get(currentProject.sourceDir, currentProject.main + ".bp");
         java.nio.file.Path jc = java.nio.file.Paths.get(currentProject.sourceDir, currentProject.main + ".jc");
-        if (!(java.nio.file.Files.exists(bp) && java.nio.file.Files.exists(jc))) return false;
-        JOptionPane.showMessageDialog(this,
-                "El main está dos veces, " + bp.getFileName() + " y " + jc.getFileName()
-                + ":\nel proyecto no sabe cuál compilar. Quita uno de los dos.",
-                "Proyecto", JOptionPane.WARNING_MESSAGE);
-        return true;
+        if (!(java.nio.file.Files.exists(bp) && java.nio.file.Files.exists(jc))) return null;
+        return "El main está dos veces, " + bp.getFileName() + " y " + jc.getFileName()
+                + ":\nel proyecto no sabe cuál compilar. Quita uno de los dos.";
     }
 
     /** V8 #698 — Edit → Traducir a JC / a BP: guarda el fichero activo y abre su traducción en una pestaña nueva, sin
@@ -2178,14 +2198,141 @@ public class FrmMain extends javax.swing.JFrame
      * última carpeta usada para que el usuario no tenga que navegar.
      */
     private void onLoad() {
+        comandos.desdeLaVentana("abrir");   // V9 H2.2: el comando
+    }
+
+    // ================================================================
+    // V9 H2.2 (22-nov) — LOS COMANDOS (Comandos). Idea de Eduardo: «transformar los eventos de los botones a comandos y
+    // luego es trivial llamar a un comando desde un botón». Cada uno, su lógica aquí (en el EDT), lo que pide la ventana
+    // con sus diálogos, y un Resultado; los diálogos que antes iban dentro de la acción («Editor vacío»…) son resultados
+    // que la ventana enseña igual. La primera tanda: ficheros, compilar, ejecutar en el PC y parar.
+    // ================================================================
+
+    /** Los comandos del IDE: los del menú y la barra, por su nombre. */
+    private Comandos comandos;
+
+    /** Cómo acabó el último programa ejecutado en el PC (su EXITED), para el resultado de «ejecutar». */
+    private volatile edu.bpgenvm.vm.debug.ExitedEvent ultimoExited;
+
+    private static CompletableFuture<Resultado> listo(Resultado r) {
+        return CompletableFuture.completedFuture(r);
+    }
+
+    private void registraComandos() {
+        comandos.registra("nuevo", "New", p -> listo(nuevoFichero()))
+                .ayuda("Nuevo fichero");
+        comandos.registra("abrir", "Load", this::abrir)
+                .ayuda("Abrir fichero")
+                .parametro("fichero", "la ruta del fichero .bp o .jc que abrir")
+                .pide(this::pideFicheroQueAbrir);
+        comandos.registra("guardar", "Save", p -> listo(guardarYa(p)))
+                .ayuda("Guardar fichero")
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla")
+                .pide(this::pideNombreSiHaceFalta);
+        comandos.registra("compilar", "Compile", p -> compilarOEjecutar(false, p))
+                .ayuda("Compilar")
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaCompilar);
+        comandos.registra("ejecutar", "Run", p -> compilarOEjecutar(true, p))
+                .ayuda("Ejecutar (VM local)")
+                .parametro("como", "si la pestaña aún no tiene fichero, la ruta con la que guardarla antes")
+                .pide(this::pideParaCompilar);
+        comandos.registra("parar", "Stop", p -> listo(parar()))
+                .ayuda("Parar (Ctrl+F2)")
+                .atajo(KeyStroke.getKeyStroke("ctrl F2"));
+    }
+
+    /** «abrir»: abre el fichero en una pestaña (lo de File → Load sin el selector). */
+    private CompletableFuture<Resultado> abrir(Map<String, Object> p) {
+        Object f = p.get("fichero");
+        if (f == null) return listo(Resultado.mal("abrir: falta el parámetro 'fichero'"));
+        Path ruta = java.nio.file.Paths.get(f.toString()).toAbsolutePath();
+        if (!Files.isRegularFile(ruta)) return listo(Resultado.mal("abrir: no existe el fichero " + ruta));
+        if (ruta.getParent() != null) rememberLastDir(ruta.getParent().toFile());
+        openFileInEditor(ruta);
+        return listo(Resultado.bien("abierto " + ruta).con("fichero", ruta.toString()));
+    }
+
+    /** Desde la ventana, «abrir» pide el fichero con el selector, como siempre; null si se cancela. */
+    private Map<String, Object> pideFicheroQueAbrir() {
         JFileChooser fc = new JFileChooser();
         fc.setFileFilter(new FileNameExtensionFilter("BasicPlus (*.bp, *.jc)", "bp", "jc"));   // V8 #698: o JC
         File initial = initialChooserDir();
         if (initial != null) fc.setCurrentDirectory(initial);
-        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
-        File chosen = fc.getSelectedFile();
-        rememberLastDir(chosen.getParentFile());
-        openFileInEditor(chosen.toPath());
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return null;
+        Map<String, Object> p = new HashMap<>();
+        p.put("fichero", fc.getSelectedFile().getAbsolutePath());
+        return p;
+    }
+
+    /** Desde la ventana, «guardar» pide nombre sólo si la pestaña aún no tiene fichero (el «Save As» de siempre). */
+    private Map<String, Object> pideNombreSiHaceFalta() {
+        Map<String, Object> p = new HashMap<>();
+        OpenFile of = openFiles.get(jTabbedPane1.getSelectedComponent());
+        if (of == null || of.file != null) return p;
+        JFileChooser fc = new JFileChooser();
+        fc.setFileFilter(new FileNameExtensionFilter("BasicPlus (*.bp, *.jc)", "bp", "jc"));
+        File initial = initialChooserDir();
+        if (initial != null) fc.setCurrentDirectory(initial);
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return null;
+        p.put("como", fc.getSelectedFile().getAbsolutePath());
+        return p;
+    }
+
+    /** Desde la ventana, compilar y ejecutar piden lo mismo que «guardar», salvo que no vayan a llegar a guardar (el
+     *  editor vacío, el main dos veces): entonces, nada, y el resultado lo dice, como antes, sin pedir un nombre. */
+    private Map<String, Object> pideParaCompilar() {
+        if (editorArea.getText().isEmpty() || motivoMainDosVeces() != null) return new HashMap<>();
+        return pideNombreSiHaceFalta();
+    }
+
+    /** «nuevo»: una pestaña nueva sin fichero (lo de File → New). */
+    private Resultado nuevoFichero() {
+        RSyntaxTextArea ed = newEditorPane();
+        JScrollPane sc = new RTextScrollPane(ed);
+        String title = "(nuevo)";
+        jTabbedPane1.addTab(title, sc);
+        openFiles.put(sc, new OpenFile(ed, sc, null));
+        installTabCloseButton(sc, title);
+        jTabbedPane1.setSelectedComponent(sc);
+        refreshActiveTab();
+        return Resultado.bien("pestaña nueva, sin fichero");
+    }
+
+    /**
+     * «guardar»: escribe el fichero de la pestaña activa (lo de File → Save). Si aún no tiene fichero, el de `como`; sin
+     * él, un resultado que lo dice (la ventana lo pide antes con el selector). Sin extensión, la del lenguaje del
+     * editor (V8 #698: una traducción a JC se guarda como .jc).
+     */
+    private Resultado guardarYa(Map<String, Object> p) {
+        java.awt.Component sel = jTabbedPane1.getSelectedComponent();
+        OpenFile of = openFiles.get(sel);
+        if (of == null) return Resultado.mal("guardar: no hay ninguna pestaña activa");
+        if (of.file == null) {
+            Object como = p.get("como");
+            if (como == null) {
+                return Resultado.mal("guardar: la pestaña aún no tiene fichero; falta el parámetro 'como'");
+            }
+            File chosen = new File(como.toString()).getAbsoluteFile();
+            String nombre = chosen.getName().toLowerCase();
+            if (!nombre.endsWith(".bp") && !nombre.endsWith(".jc")) {
+                boolean esJc = "text/jc".equals(of.editor.getSyntaxEditingStyle());
+                chosen = new File(chosen.getAbsolutePath() + (esJc ? ".jc" : ".bp"));
+            }
+            of.file = chosen.toPath();
+            of.editor.setSyntaxEditingStyle(estiloPara(of.file));
+            currentFile = of.file;
+            rememberLastDir(chosen.getParentFile());
+        }
+        try {
+            Files.write(of.file, of.editor.getText().getBytes(StandardCharsets.UTF_8));
+            setTabTitle(of.scroll, of.file.getFileName().toString());
+            setTitle(titulo(String.valueOf(of.file)));
+            if (lblStatusFile != null) lblStatusFile.setText(of.file.toString());
+        } catch (IOException ex) {
+            return Resultado.aviso("Error", "No se pudo guardar: " + ex.getMessage(), JOptionPane.ERROR_MESSAGE);
+        }
+        return Resultado.bien("guardado " + of.file).con("fichero", of.file.toString());
     }
 
     /**
@@ -2278,14 +2425,7 @@ public class FrmMain extends javax.swing.JFrame
      * inicial, así que el resto del IDE no necesita cambios.
      */
     private void onNewFile() {
-        RSyntaxTextArea ed = newEditorPane();
-        JScrollPane sc = new RTextScrollPane(ed);
-        String title = "(nuevo)";
-        jTabbedPane1.addTab(title, sc);
-        openFiles.put(sc, new OpenFile(ed, sc, null));
-        installTabCloseButton(sc, title);
-        jTabbedPane1.setSelectedComponent(sc);
-        refreshActiveTab();
+        comandos.desdeLaVentana("nuevo");   // V9 H2.2: el comando
     }
 
     /**
@@ -2294,37 +2434,7 @@ public class FrmMain extends javax.swing.JFrame
      * y lo asocia al OpenFile del tab. Actualiza el título del tab.
      */
     private void onSave() {
-        java.awt.Component sel = jTabbedPane1.getSelectedComponent();
-        OpenFile of = openFiles.get(sel);
-        if (of == null) return;   // no debería pasar — siempre hay tab activo
-
-        if (of.file == null) {
-            JFileChooser fc = new JFileChooser();
-            fc.setFileFilter(new FileNameExtensionFilter("BasicPlus (*.bp, *.jc)", "bp", "jc"));
-            File initial = initialChooserDir();
-            if (initial != null) fc.setCurrentDirectory(initial);
-            if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
-            File chosen = fc.getSelectedFile();
-            // V8 #698 — sin extensión, la del lenguaje del editor: una traducción a JC se guarda como .jc.
-            String nombre = chosen.getName().toLowerCase();
-            if (!nombre.endsWith(".bp") && !nombre.endsWith(".jc")) {
-                boolean esJc = "text/jc".equals(of.editor.getSyntaxEditingStyle());
-                chosen = new File(chosen.getAbsolutePath() + (esJc ? ".jc" : ".bp"));
-            }
-            of.file = chosen.toPath();
-            of.editor.setSyntaxEditingStyle(estiloPara(of.file));
-            currentFile = of.file;
-            rememberLastDir(chosen.getParentFile());
-        }
-        try {
-            Files.write(of.file, of.editor.getText().getBytes(StandardCharsets.UTF_8));
-            setTabTitle(of.scroll, of.file.getFileName().toString());
-            setTitle(titulo(String.valueOf(of.file)));
-            if (lblStatusFile != null) lblStatusFile.setText(of.file.toString());
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "No se pudo guardar: " + ex.getMessage(),
-                    "Error", JOptionPane.ERROR_MESSAGE);
-        }
+        comandos.desdeLaVentana("guardar");   // V9 H2.2: el comando (síncrono: lo de después ve lo guardado)
     }
 
     /**
@@ -2494,18 +2604,38 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     private void doRun(boolean execute) {
+        comandos.desdeLaVentana(execute ? "ejecutar" : "compilar");   // V9 H2.2: el comando
+    }
+
+    /**
+     * V9 H2.2 — «compilar» (execute=false) y «ejecutar» en el PC (true): lo de Run → Compile y Run → Run, como comando.
+     * El resultado, al acabar: los errores de la compilación, la salida de la consola y, si se ejecutó, cómo acabó el
+     * programa (su EXITED: el código, el estado, lo que tardó y, si falló, dónde). Los diálogos de antes («Editor vacío»,
+     * el main dos veces, «un programa a la vez») son resultados que la ventana enseña igual.
+     */
+    private CompletableFuture<Resultado> compilarOEjecutar(boolean execute, Map<String, Object> p) {
+        final String que = execute ? "ejecutar" : "compilar";
         if (editorArea.getText().isEmpty()) {
-            JOptionPane.showMessageDialog(this, "Editor vacío. Carga o escribe un fichero primero.",
-                    "Aviso", JOptionPane.INFORMATION_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Aviso", "Editor vacío. Carga o escribe un fichero primero.",
+                    JOptionPane.INFORMATION_MESSAGE));
         }
-        if (mainDosVeces()) return;   // V8 #698
-        onSave();
-        if (currentFile == null) return;
-        if (execute && !empiezaUnaEjecucion()) return;   // V8 #822: un programa a la vez (compilar, sí)
+        String dos = motivoMainDosVeces();   // V8 #698
+        if (dos != null) return listo(Resultado.aviso("Proyecto", dos, JOptionPane.WARNING_MESSAGE));
+        Resultado guardado = guardarYa(p);
+        if (!guardado.ok) return listo(guardado);
+        if (currentFile == null) return listo(Resultado.mal(que + ": la pestaña no tiene fichero"));
+        if (execute && !marcaUnaEjecucion()) {   // V8 #822: un programa a la vez (compilar, sí)
+            return listo(Resultado.aviso("Un programa a la vez",
+                    "Ya hay un programa en marcha.\nPáralo con Stop antes de ejecutar otro.",
+                    JOptionPane.INFORMATION_MESSAGE));
+        }
 
         consolaArea.setText("");
         errors.clear();
+        ultimoExited = null;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        final StringBuilder salida = new StringBuilder();
+        final java.util.concurrent.atomic.AtomicBoolean compilo = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         // Modo proyecto (.bpbuild): compila <sourceDir>/<main>.bp a <outDir>.
         // Sin proyecto: compila el fichero abierto a <suDir>/out (comportamiento histórico).
@@ -2549,6 +2679,7 @@ public class FrmMain extends javax.swing.JFrame
                     publish("== compilación falló ==\n");
                     return null;
                 }
+                compilo.set(true);   // V9 H2.2
                 if (!execute) {
                     publish("== compilación OK ==\n");
                     return null;
@@ -2582,13 +2713,50 @@ public class FrmMain extends javax.swing.JFrame
                 for (String s : chunks) {
                     appendConsola(s);
                     parseAndAddError(s);
+                    salida.append(s);   // V9 H2.2: la salida de ESTE comando, al resultado
                 }
             }
             @Override
             protected void done() {
                 if (execute) acabaLaEjecucion();   // V8 #822
+                fin.complete(resultadoDeCompilar(que, execute, compilo.get(), salida.toString()));
             }
         }.execute();
+        return fin;
+    }
+
+    /** V9 H2.2 — el resultado de «compilar» y «ejecutar»: los errores (de la tabla), la salida de la consola y, si se
+     *  ejecutó, cómo acabó el programa. */
+    private Resultado resultadoDeCompilar(String que, boolean execute, boolean compilo, String salida) {
+        List<Map<String, Object>> errs = new ArrayList<>();
+        for (CompileError ce : errors.snapshot()) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("fichero", ce.file);
+            m.put("linea", ce.line);
+            m.put("columna", ce.column);
+            m.put("tipo", ce.kind);
+            m.put("categoria", ce.category);
+            m.put("mensaje", ce.message);
+            errs.add(m);
+        }
+        Resultado r;
+        if (!compilo) {
+            r = Resultado.mal(que + ": la compilación falló");
+        } else if (!execute) {
+            r = Resultado.bien("compilar: compilación OK");
+        } else {
+            edu.bpgenvm.vm.debug.ExitedEvent ex = ultimoExited;
+            if (ex == null) {
+                r = Resultado.mal("ejecutar: el programa no llegó a acabar (lo dice la salida)");
+            } else {
+                r = ex.exitCode == 0 ? Resultado.bien("ejecutar: el programa acabó bien")
+                                     : Resultado.mal("ejecutar: el programa acabó con error");
+                r.con("codigo", ex.exitCode).con("estado", ex.reason);
+                if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
+                if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
+            }
+        }
+        return r.con("errores", errs).con("salida", salida);
     }
 
     /**
@@ -3172,6 +3340,7 @@ public class FrmMain extends javax.swing.JFrame
                                     (edu.bpgenvm.vm.debug.ExceptionEvent) ev;
                             publish.accept("[exception tid=" + e.tid + "] " + e.message + "\n");
                         } else if (ev instanceof edu.bpgenvm.vm.debug.ExitedEvent) {
+                            ultimoExited = (edu.bpgenvm.vm.debug.ExitedEvent) ev;   // V9 H2.2: cómo acabó, al resultado
                             traza.alAcabar((edu.bpgenvm.vm.debug.ExitedEvent) ev);
                         }
                     });
@@ -3261,8 +3430,13 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     /** V8 #822 — true si puede empezar una ejecución, y la marca; si ya hay un programa en marcha, lo dice y false. */
+    /** V9 H2.2 — lo de empiezaUnaEjecucion sin el diálogo (para los comandos): true si puede empezar, y la marca. */
+    private boolean marcaUnaEjecucion() {
+        return !hayUnProgramaEnMarcha() && ejecutando.compareAndSet(false, true);
+    }
+
     private boolean empiezaUnaEjecucion() {
-        if (!hayUnProgramaEnMarcha() && ejecutando.compareAndSet(false, true)) return true;
+        if (marcaUnaEjecucion()) return true;
         JOptionPane.showMessageDialog(this,
                 "Ya hay un programa en marcha.\nPáralo con Stop antes de ejecutar otro.",
                 "Un programa a la vez", JOptionPane.INFORMATION_MESSAGE);
@@ -3283,6 +3457,12 @@ public class FrmMain extends javax.swing.JFrame
 
     /** P-run-stop (#257) — acción del menú Run → Stop. */
     private void onStopRun() {
+        comandos.desdeLaVentana("parar");   // V9 H2.2: el comando
+    }
+
+    /** V9 H2.2 — «parar»: lo de Run → Stop, como comando. Lo que pasa lo sigue diciendo la consola; el resultado dice
+     *  qué se paró (el KILL a la VM local se contesta después, en su hilo). */
+    private Resultado parar() {
         BpvmClient c = activeRunClient;
         try {
             if (c != null) {
@@ -3302,20 +3482,25 @@ public class FrmMain extends javax.swing.JFrame
                 }, "ide-stop");
                 t.setDaemon(true);
                 t.start();
+                return Resultado.bien("parar: el KILL, pedido a la VM local");
             } else if (vmcProcess != null && vmcProcess.isAlive()) {
                 /* V8 #822 — el Stop también para la VM-C de Run Window. Con un programa sin pantalla no hay ventana que
                  * cerrar: antes, sólo cerrando el IDE (y su proceso seguía). */
                 vmcProcess.destroy();
                 appendConsola("[ide] Stop: se para la VM-C de la ventana\n");
+                return Resultado.bien("parar: se para la VM-C de la ventana");
             } else if (picoExplorer != null && picoExplorer.isConnected()) {
                 picoExplorer.killRunning();   // también lo que arrancó la placa sola (un autorun): #256
+                return Resultado.bien("parar: el KILL, pedido a la placa");
             } else {
                 /* V8 #822 — sin nada en marcha en el PC y sin placa: antes, «[Explorer] Stop: no hay placa conectada»,
                  * que confunde después de un Run en el PC. */
                 consolaArea.append("[ide] Stop: no hay ejecución en curso\n");
+                return Resultado.mal("parar: no hay ninguna ejecución en curso");
             }
         } catch (Exception ex) {
             consolaArea.append("[ide] Stop falló: " + ex.getMessage() + "\n");
+            return Resultado.mal("parar: " + ex.getMessage());
         }
     }
 
