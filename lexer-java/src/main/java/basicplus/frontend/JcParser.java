@@ -273,7 +273,7 @@ final class JcParser {
         }
         if (isNative && !es("function")) throw error("'native' sólo se aplica a 'function'");
         if (es("const")) {
-            if (isStatic) throw error("una constante no lleva 'static': ya es de la clase, como en C# (punto 34)");
+            if (isStatic) throw error("una constante no lleva 'static': ya es de la clase, como en C#");   // punto 34
             defs.add(constante(isPublic, clase));   // en una clase, BP le pone delante el nombre de la clase
             return;
         }
@@ -447,7 +447,7 @@ final class JcParser {
         while (true) {
             IExpr tamano = null;
             if (acepta("[")) {
-                if (tipo instanceof ArrayTypeRef) throw error("un array de tamaño fijo es de un tipo simple: int nums[10] (punto 33)");
+                if (tipo instanceof ArrayTypeRef) throw error("un array de tamaño fijo es de un tipo simple: int nums[10]");   // punto 33
                 tamano = expresion();
                 espera("]");
             }
@@ -509,7 +509,7 @@ final class JcParser {
             avanza();
             avanza();
             if (!(esNombre() && actual().texto.equals("set") && mira(1).es(";")))
-                throw error("la propiedad corta es { get; set; } (punto 32)");
+                throw error("la propiedad corta es { get; set; }");   // punto 32
             avanza();
             avanza();
         } else {
@@ -551,7 +551,7 @@ final class JcParser {
             String vn = nombre("el nombre de un valor del enum");
             Long val = null;
             if (acepta("=")) {
-                if (actual().tipo != Tipo.ENTERO) throw error("el valor de un enum es un entero escrito, sin signo (punto 25)");
+                if (actual().tipo != Tipo.ENTERO) throw error("el valor de un enum es un entero escrito, sin signo");   // punto 25
                 val = (Long) avanza().valor;
             }
             vs.add(new EnumValue(vn, val, vt.linea, vt.columna));
@@ -843,7 +843,7 @@ final class JcParser {
             return;
         }
         if (es("inline"))
-            throw error("en JC, inline es el cuerpo entero de una función: function T f(…) inline …; (punto 26)");
+            throw error("en JC, inline es el cuerpo entero de una función: function T f(…) inline …;");   // punto 26
         if (es("owner") || esDeclaracion()) {
             boolean owner = acepta("owner");
             TypeRef tipo = tipo();
@@ -940,20 +940,20 @@ final class JcParser {
         Tok t = espera("for");
         String nombreDelBucle = esNombre() ? nombre("el nombre del bucle") : null;   // V8/H8: `for miLoop (int i = 0; …) { … }`
         espera("(");
-        espera("int", "'int': la variable del for es un int, como en BP (punto 11)");
+        espera("int", "'int': la variable del for es un int, como en BP");   // punto 11
         String i = nombre("el nombre de la variable del for");
         espera("=");
         IExpr desde = expresion();
         espera(";");
-        if (!(esNombre() && actual().texto.equals(i))) throw error("la condición del for es sobre '" + i + "' (punto 11)");
+        if (!(esNombre() && actual().texto.equals(i))) throw error("la condición del for es sobre '" + i + "'");   // punto 11
         avanza();
         boolean sube;
         if (acepta("<=")) sube = true;
         else if (acepta(">=")) sube = false;
-        else throw error("la condición del for es '" + i + " <= límite' si sube, o '" + i + " >= límite' si baja (punto 11)");
+        else throw error("la condición del for es '" + i + " <= límite' si sube, o '" + i + " >= límite' si baja");   // punto 11
         IExpr hasta = expresion();
         espera(";");
-        if (!(esNombre() && actual().texto.equals(i))) throw error("el incremento del for es de '" + i + "' (punto 11)");
+        if (!(esNombre() && actual().texto.equals(i))) throw error("el incremento del for es de '" + i + "'");   // punto 11
         Tok it = avanza();
         IExpr paso;
         if (acepta("++")) {
@@ -969,7 +969,7 @@ final class JcParser {
             if (sube) throw error("con '<=' el for sube: el incremento es " + i + "++ o " + i + " += n");
             paso = new UnaryExpr("-", numeroDelPaso(), it.linea, it.columna);
         } else {
-            throw error("el incremento del for es " + i + "++, " + i + "--, " + i + " += n o " + i + " -= n (punto 11)");
+            throw error("el incremento del for es " + i + "++, " + i + "--, " + i + " += n o " + i + " -= n");   // punto 11
         }
         espera(")");
         boolean conLlaves = es("{");
@@ -982,7 +982,7 @@ final class JcParser {
 
     private IExpr numeroDelPaso() {
         Tok n = actual();
-        if (n.tipo != Tipo.ENTERO) throw error("el paso del for es un número (punto 11)");
+        if (n.tipo != Tipo.ENTERO) throw error("el paso del for es un número");   // punto 11
         avanza();
         return new IntLitExpr((Long) n.valor, n.linea, n.columna);
     }
@@ -992,7 +992,7 @@ final class JcParser {
         Tok t = espera("foreach");
         String nombreDelBucle = esNombre() ? nombre("el nombre del bucle") : null;   // V8/H8: `foreach miLoop (var x in l) { … }`
         espera("(");
-        espera("var", "'var': la variable del foreach toma el tipo de los elementos (punto 16)");
+        espera("var", "'var': la variable del foreach toma el tipo de los elementos");   // punto 16
         String x = nombre("el nombre de la variable del foreach");
         espera("in");
         IExpr col = expresion();
@@ -1206,7 +1206,7 @@ final class JcParser {
     /** Una asignación (`=`, los compuestos, y `v++` y `v--`, que son `+= 1` y `-= 1`: punto 12), o una llamada. */
     private IStmt asignacionOLlamada() {
         Tok t = actual();
-        if (es("++") || es("--")) throw error("en JC, ++ y -- van detrás: v++; (punto 12)");
+        if (es("++") || es("--")) throw error("en JC, ++ y -- van detrás: v++;");   // punto 12
         IExpr lhs = postfijo();
         AssignOpKind k = asignacionDe(actual());
         if (k != null) {
@@ -1350,7 +1350,7 @@ final class JcParser {
         Tok t = actual();
         if (acepta("-")) return new UnaryExpr("-", unario(), t.linea, t.columna);
         if (acepta("!")) return new UnaryExpr("not", unario(), t.linea, t.columna);
-        if (es("++") || es("--")) throw error("++ y -- sólo como sentencia, detrás: v++; (punto 12)");
+        if (es("++") || es("--")) throw error("++ y -- sólo como sentencia, detrás: v++;");   // punto 12
         if (es("~")) throw error("JC no tiene el ~ de C#: BP no tiene el no de bits");
         if (es("(") && esConversion()) return conversion();
         return potencia();
@@ -1532,9 +1532,9 @@ final class JcParser {
             avanza();
             return new SuperExpr(t.linea, t.columna);
         }
-        if (es("super")) throw error("en JC es 'base', como en C# (punto 34)");
+        if (es("super")) throw error("en JC es 'base', como en C#");   // punto 34
         if (t.tipo == Tipo.RESERVADA && TIPOS.containsKey(t.texto))
-            throw error("en JC, una conversión se escribe (" + t.texto + ") x (punto 23)");
+            throw error("en JC, una conversión se escribe (" + t.texto + ") x");   // punto 23
         throw error("se esperaba una expresión, encontrado " + t);
     }
 }

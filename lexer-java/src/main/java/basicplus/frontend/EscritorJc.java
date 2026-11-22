@@ -509,7 +509,7 @@ public final class EscritorJc {
         else if (s instanceof SwitchStmt)         segun((SwitchStmt) s);
         else if (s instanceof ParallelStmt)       paralelo((ParallelStmt) s);
         else if (s instanceof RaiseStmt)          linea(dispara((RaiseStmt) s) + ";");
-        else if (s instanceof InlineStmt)         throw new NoSoportado("un inline entre otras sentencias (punto 26)", s);
+        else if (s instanceof InlineStmt)         throw new NoSoportado("un inline entre otras sentencias", s);   // punto 26
         else throw new NoSoportado(s.getClass().getSimpleName(), s);
     }
 
@@ -584,7 +584,7 @@ public final class EscritorJc {
     private static String conNombre(String palabra, String nombre) { return nombre != null ? palabra + " " + nombre : palabra; }
 
     private void hacer(DoLoopStmt d) {
-        if (d.condition == null) throw new NoSoportado("un do … loop sin condición (punto 9)", d);
+        if (d.condition == null) throw new NoSoportado("un do … loop sin condición", d);   // punto 9
         linea(conNombre("do", d.nombre));
         linea("{");
         nivel++;
@@ -613,7 +613,7 @@ public final class EscritorJc {
                 cmp = ">=";
                 paso = v == 1 ? it + "--" : it + " -= " + v;
             } else {
-                throw new NoSoportado("un for cuyo paso no es un número (punto 11)", f);
+                throw new NoSoportado("un for cuyo paso no es un número", f);   // punto 11
             }
             cab = conNombre("for", f.nombre) + " (int " + it + " = " + expr(r.from) + "; " + it + " " + cmp + " " + expr(r.to, P_DESPL)
                 + "; " + paso + ")";

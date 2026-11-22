@@ -129,6 +129,13 @@ class CompilaJcTest {
                 "module Malo\n{\n   public function void main()\n   {\n      int x = ;\n   }\n}\n");
         assertFalse((Boolean) sin[0], (String) sin[1]);
         assertTrue(((String) sin[1]).contains("[5:15] error sintáctico: "), (String) sin[1]);
+
+        // #845: el mensaje, sin el «(punto N)» del cuaderno de diseño, que el usuario no tiene
+        Object[] mas = compila(tmp.resolve("delante"), "Malo", "Malo.jc",
+                "module Malo\n{\n   public function void main()\n   {\n      int i = 0;\n      do ++i; while (i < 3);\n   }\n}\n");
+        assertFalse((Boolean) mas[0], (String) mas[1]);
+        assertTrue(((String) mas[1]).contains("[6:10] error sintáctico: en JC, ++ y -- van detrás: v++;"), (String) mas[1]);
+        assertFalse(((String) mas[1]).contains("(punto"), (String) mas[1]);
     }
 
     /** Dos clases (una hija con su `: base` y su `: this`), una con un constructor de un entero, y una función; en
@@ -261,11 +268,23 @@ class CompilaJcTest {
     }
 
     @Test
-    @DisplayName("lo que no es de la familia no se convierte, con constructor o sin él (#797)")
+    @DisplayName("lo que no es de la familia no se convierte, con constructor o sin él, y sólo se dice eso (#797, #845)")
     void conversionFueraDeLaFamilia(@TempDir Path tmp) throws Exception {
-        Object[] r = compila(tmp, "Cajas", "Cajas.jc", cajas("Otra o = new Otra(); Caja c = (Caja) o;"));
-        assertFalse((Boolean) r[0], (String) r[1]);
-        assertTrue(((String) r[1]).contains("'(Caja) x' no es una conversión: un 'Otra' no se convierte en 'Caja'"), (String) r[1]);
+        String[][] casos = {
+            // Caja tiene un constructor que acepta un Object
+            {"Otra o = new Otra(); Caja c = (Caja) o;",
+                "'(Caja) x' no es una conversión: un 'Otra' no se convierte en 'Caja'"},
+            // Otra no define constructor: antes salía primero «no define constructor; no admite argumentos» (#845)
+            {"Caja c = new Caja(\"x\"); Otra o = (Otra) c;",
+                "'(Otra) x' no es una conversión: un 'Caja' no se convierte en 'Otra'"},
+        };
+        for (int i = 0; i < casos.length; i++) {
+            Object[] r = compila(tmp.resolve("caso" + i), "Cajas", "Cajas.jc", cajas(casos[i][0]));
+            String dice = (String) r[1];
+            assertFalse((Boolean) r[0], dice);
+            assertTrue(dice.contains(casos[i][1]), dice);
+            assertEquals(1, dice.split("error semántico", -1).length - 1, "un error, y sólo ése:\n" + dice);
+        }
     }
 
     @Test

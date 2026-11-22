@@ -4334,6 +4334,15 @@ public final class SemanticAnalyzer {
                     return new ClassType(cls);
                 }
             }
+            // #845 — en JC, `(Caja) x` nunca construye (#797): la conversión que no vale la dice `revisaJc`, con su
+            // porqué. Pasar antes por el constructor daba un error que no venía a cuento («no define constructor», una
+            // firma que no casa, una sobrecarga que no se elige). BP no llega aquí con `esConversion`.
+            if (ce.esConversion) {
+                if (ce.args.size() != 1) for (IExpr a : ce.args) analyzeExpr(a, scope, null);
+                BpType a0 = ce.args.size() == 1 ? info.exprTypes.get(ce.args.get(0)) : null;
+                if (a0 instanceof ErrorType) return ErrorType.INSTANCE;   // lo que falla en `x` ya está dicho
+                return new ClassType(cls);
+            }
             FunctionSymbol ctor = cls.findConstructor();
             if (ctor == null) {
                 if (!ce.args.isEmpty())
