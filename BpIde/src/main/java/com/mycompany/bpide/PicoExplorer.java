@@ -293,8 +293,8 @@ public final class PicoExplorer extends JPanel {
                     if (sel == null) return;
                     // .mod = ejecutable → run (como siempre); cualquier
                     // otro fichero (config, log, .txt…) → ver/editar.
-                    if (sel.name.toLowerCase().endsWith(".mod")) onRun();
-                    else onEdit();
+                    if (sel.name.toLowerCase().endsWith(".mod")) comandos.desdeLaVentana("placa_ejecutar");
+                    else comandos.desdeLaVentana("placa_editar");
                 }
             }
         });
@@ -317,19 +317,18 @@ public final class PicoExplorer extends JPanel {
         });
 
         conSuComando(btnConnect, "placa_conectar");
-        btnRefresh.addActionListener(e -> onRefresh());
-        btnUpload.addActionListener(e -> onUpload());
-        btnRun.addActionListener(e -> onRun());
-        btnGet.addActionListener(e -> onDownload());
-        btnEdit.addActionListener(e -> onEdit());
-        btnDelete.addActionListener(e -> onDelete());
-        btnSave.addActionListener(e -> onSave());
-        btnLog.addActionListener(e -> onLog());
-        btnLogClr.addActionListener(e -> onLogClear());
-        btnReset.addActionListener(e -> onReset());
-        btnInfo.addActionListener(e -> onInfo());
-        btnWifi.setToolTipText("La red a la que se conecta la placa: escribe /sys/wifi.json");
-        btnWifi.addActionListener(e -> onWifi());
+        conSuComando(btnRefresh, "placa_refrescar");
+        conSuComando(btnUpload, "placa_subir");
+        conSuComando(btnRun, "placa_ejecutar");
+        conSuComando(btnGet, "placa_bajar");
+        conSuComando(btnEdit, "placa_editar");
+        conSuComando(btnDelete, "placa_borrar");
+        conSuComando(btnSave, "placa_guardar");
+        conSuComando(btnLog, "placa_log");
+        conSuComando(btnLogClr, "placa_borrar_log");
+        conSuComando(btnReset, "placa_reiniciar");
+        conSuComando(btnInfo, "placa_info");
+        conSuComando(btnWifi, "placa_wifi");   // su ayuda, la del comando
 
         refreshPorts();
         setConnectedUI(false);
@@ -358,6 +357,38 @@ public final class PicoExplorer extends JPanel {
                 .ayuda("Arranca una VM Java en este PC, en el puerto del endpoint, y se conecta a ella")
                 .parametro("arrancar", "true la arranca (y se conecta) y false la para; sin él, alterna (como el botón)")
                 .parametro("donde", "localhost:puerto (sin él, el del panel)");
+
+        // -- La 4b: los ficheros y la placa. Sin `fichero`, lo seleccionado en el árbol (lo que hace el botón).
+        comandos.registra("placa_refrescar", "Refresh", p -> refresca());
+        comandos.registra("placa_subir", "Upload…", this::subir)
+                .parametro("ficheros", "las rutas de los ficheros del PC que subir (una lista, o una)")
+                .parametro("destino", "dónde, en la placa: con un fichero, su ruta (o una carpeta acabada en /); con"
+                        + " varios, la carpeta (sin él, /app)")
+                .pide(this::pideSubida);
+        comandos.registra("placa_ejecutar", "Run", this::ejecutaFichero)
+                .parametro("fichero", "la ruta del .mod (o .pack) en la placa")
+                .pide(this::pideLoSeleccionado);
+        comandos.registra("placa_bajar", "Download…", this::bajar)
+                .parametro("fichero", "la ruta en la placa")
+                .parametro("destino", "la ruta del fichero en el PC donde dejarlo")
+                .pide(this::pideBajada);
+        comandos.registra("placa_editar", "Edit", p -> {
+            onEdit();
+            return listo(Resultado.bien("hecho"));
+        }).soloVentana();
+        comandos.registra("placa_borrar", "Delete", this::borrar)
+                .parametro("ficheros", "las rutas en la placa (una lista, o una)")
+                .pide(this::pideBorrado);
+        comandos.registra("placa_guardar", "Save", this::guardaElFs);
+        comandos.registra("placa_log", "Log", this::elLog);
+        comandos.registra("placa_borrar_log", "Clr Log", this::borraElLog);
+        comandos.registra("placa_reiniciar", "Reset", this::reinicia)
+                .pide(this::pideElReinicio);
+        comandos.registra("placa_info", "Info", this::elInfo);
+        comandos.registra("placa_wifi", "WiFi", p -> {
+            onWifi();
+            return listo(Resultado.bien("hecho"));
+        }).ayuda("La red a la que se conecta la placa: escribe /sys/wifi.json").soloVentana();
     }
 
     /** El botón, con la Action de su comando. El texto, el icono y la ayuda que tenía se quedan: los que cambian con el
@@ -1562,12 +1593,6 @@ public final class PicoExplorer extends JPanel {
         runAsync(() -> {
             try {
                 return tarea.run();
-            } catch (Exception ex) {
-                // V9 H2.2 — también si falla (la subida, el RUN): quien espera el fin lo sabe. El error lo sigue
-                // pintando runAsync, como siempre.
-                final String msg = ex.getMessage() == null ? ex.toString() : ex.getMessage();
-                SwingUtilities.invokeLater(() -> avisaFinDelRun("error: " + msg));
-                throw ex;
             } finally {
                 ejecutandoEnLaPlaca = false;
             }
@@ -1587,7 +1612,7 @@ public final class PicoExplorer extends JPanel {
             status.setText("Done: " + statusStr);
             avisaFinDelRun(statusStr);
             onRefresh();
-        });
+        }, motivo -> avisaFinDelRun("error: " + motivo));   // V9 H2.2: también si falla, después de que se pinte
     }
 
     /** V9 H2.2 — quien espera el fin del próximo programa que se lance desde aquí (el comando «ejecutar_placa»): se le
@@ -2402,9 +2427,9 @@ public final class PicoExplorer extends JPanel {
         return null;
     }
 
-    private void onUpload() {
-        if (!isConnected()) return;
-        final Backend b = this.backend;
+    /** V9 H2.2 — desde la ventana, «placa_subir» pide los ficheros y el destino, como siempre; null si se cancela. */
+    private Map<String, Object> pideSubida() {
+        if (!isConnected()) return null;
         // IDE-4 — arrancar el chooser en la última carpeta de upload usada.
         IdePrefs prefs = IdePrefs.load();
         JFileChooser fc = new JFileChooser();
@@ -2415,11 +2440,11 @@ public final class PicoExplorer extends JPanel {
         fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter(
                 ".mod files", "mod"));
         fc.setMultiSelectionEnabled(true);   // IDE-7: subir varios de una vez
-        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return;
+        if (fc.showOpenDialog(this) != JFileChooser.APPROVE_OPTION) return null;
         File[] elegidos = fc.getSelectedFiles();
         if (elegidos == null || elegidos.length == 0) {
             File uno = fc.getSelectedFile();
-            if (uno == null) return;
+            if (uno == null) return null;
             elegidos = new File[] { uno };
         }
         final File[] ficheros = elegidos;
@@ -2452,11 +2477,42 @@ public final class PicoExplorer extends JPanel {
                                                  : "Carpeta de destino en la placa:";
         String elegido = (String) JOptionPane.showInputDialog(this,
                 etiqueta, titulo, JOptionPane.PLAIN_MESSAGE, null, null, propuesta);
-        if (elegido == null) return;                      // cancelado
+        if (elegido == null) return null;                 // cancelado
         elegido = elegido.trim();
-        if (elegido.isEmpty()) return;
+        if (elegido.isEmpty()) return null;
+        Map<String, Object> p = new HashMap<>();
+        List<String> rutas = new ArrayList<>();
+        for (File uno : ficheros) rutas.add(uno.getAbsolutePath());
+        p.put("ficheros", rutas);
+        p.put("destino", elegido);
+        return p;
+    }
+
+    /** Las rutas de un parámetro que admite una lista o una sola. */
+    private static List<String> rutasDe(Object v) {
+        List<String> out = new ArrayList<>();
+        if (v instanceof java.util.Collection) {
+            for (Object o : (java.util.Collection<?>) v) if (o != null) out.add(o.toString());
+        } else if (v != null) {
+            out.add(v.toString());
+        }
+        return out;
+    }
+
+    /** V9 H2.2 — «placa_subir»: sube los ficheros del PC a la placa (lo de Upload…, sin los diálogos). El resultado,
+     *  cuando el árbol ya está refrescado: cuántos, cuántos bytes y los que no se pudieron subir, con su motivo. */
+    private CompletableFuture<Resultado> subir(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
+        final Backend b = this.backend;
+        List<String> rutas = rutasDe(p.get("ficheros"));
+        if (rutas.isEmpty()) return listo(Resultado.mal("placa_subir: falta el parámetro 'ficheros'"));
+        final File[] ficheros = new File[rutas.size()];
+        for (int i = 0; i < ficheros.length; i++) ficheros[i] = new File(rutas.get(i));
+        String elegido = p.get("destino") != null ? p.get("destino").toString().trim() : "/app";
+        if (elegido.isEmpty()) elegido = "/app";
         if (!elegido.startsWith("/")) elegido = "/" + elegido;
         final String destino = elegido;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         status.setText("Subiendo " + ficheros.length + " fichero(s) a " + destino + "...");
         runAsync(() -> {
             int hechos = 0; long bytes = 0;
@@ -2484,22 +2540,43 @@ public final class PicoExplorer extends JPanel {
             }
             status.setText("Subidos " + hechos + " de " + ficheros.length
                     + " (" + bytes + " bytes) a " + destino);
-            onRefresh();                       // UNO, al final (IDE-7)
-        });
+            Resultado res = (hechos == ficheros.length
+                    ? Resultado.bien("subidos " + hechos + " (" + bytes + " bytes) a " + destino)
+                    : Resultado.mal("subidos " + hechos + " de " + ficheros.length + " a " + destino))
+                    .con("subidos", hechos).con("bytes", bytes);
+            if (!fallos.isEmpty()) res.con("fallos", fallos.trim());
+            refresca().whenComplete((x, ex) -> fin.complete(res));   // UNO, al final (IDE-7)
+        }, motivo -> fin.complete(Resultado.mal("placa_subir: " + motivo)));
+        return fin;
     }
 
-    private void onRun() {
-        if (!isConnected()) return;
-        final Backend b = this.backend;
+    /** V9 H2.2 — desde la ventana, lo seleccionado en el árbol (el fichero de Run); sin nada seleccionado, nada, y el
+     *  resultado lo dice. */
+    private Map<String, Object> pideLoSeleccionado() {
+        Map<String, Object> p = new HashMap<>();
         Backend.Entry sel = getSelectedEntry();
-        if (sel == null) {
+        if (sel != null) p.put("fichero", sel.name);
+        return p;
+    }
+
+    /** V9 H2.2 — «placa_ejecutar»: lo de Run, con el fichero de la placa. El resultado, cuando el programa acaba: cómo
+     *  acabó (su EXITED) y lo que sacó. */
+    private CompletableFuture<Resultado> ejecutaFichero(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
+        final Backend b = this.backend;
+        Object f = p.get("fichero");
+        if (f == null) {
             status.setText("Select a file (leaf) to run");
-            return;
+            return listo(Resultado.mal("placa_ejecutar: falta el fichero (o seleccionarlo en el árbol)"));
         }
-        status.setText("Running " + sel.name + "...");
-        if (outputSink != null) outputSink.accept("--- RUN " + sel.name + " on " + b.displayName() + " ---");
+        final String ruta = f.toString();
+        status.setText("Running " + ruta + "...");
+        if (outputSink != null) outputSink.accept("--- RUN " + ruta + " on " + b.displayName() + " ---");
+        final StringBuffer salida = new StringBuffer();   // la del programa, para el resultado (en el hilo del cable)
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> {
-            return b.run(sel.name, line -> {
+            return b.run(ruta, line -> {
+                salida.append(line).append('\n');
                 if (outputSink != null) {
                     SwingUtilities.invokeLater(() -> outputSink.accept(line));
                 }
@@ -2509,27 +2586,60 @@ public final class PicoExplorer extends JPanel {
                 outputSink.accept("--- VM finished: " + statusStr + " ---");
             }
             status.setText("Done: " + statusStr);
-        });
+            edu.bpgenvm.vm.debug.ExitedEvent ex = ultimoExited();
+            Resultado r;
+            if (ex == null) {
+                r = Resultado.mal("placa_ejecutar: el programa acabó sin decir cómo (" + statusStr + ")");
+            } else {
+                r = ex.exitCode == 0 ? Resultado.bien("placa_ejecutar: el programa acabó bien")
+                                     : Resultado.mal("placa_ejecutar: el programa acabó con error");
+                r.con("codigo", ex.exitCode).con("estado", ex.reason);
+                if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
+                if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
+            }
+            fin.complete(r.con("fin", statusStr).con("salida", salida.toString()));
+        }, motivo -> fin.complete(Resultado.mal("placa_ejecutar: " + motivo).con("salida", salida.toString())));
+        return fin;
     }
 
-    private void onDownload() {
-        if (!isConnected()) return;
-        final Backend b = this.backend;
+    /** V9 H2.2 — desde la ventana, «placa_bajar»: lo seleccionado y dónde dejarlo (el selector, como siempre); null si
+     *  no hay nada seleccionado o se cancela. */
+    private Map<String, Object> pideBajada() {
+        if (!isConnected()) return null;
         Backend.Entry sel = getSelectedEntry();
-        if (sel == null) return;
+        if (sel == null) return null;
         JFileChooser fc = new JFileChooser();
         String basename = sel.name;
         int slash = basename.lastIndexOf('/');
         if (slash >= 0) basename = basename.substring(slash + 1);
         fc.setSelectedFile(new File(basename));
-        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return;
-        File out = fc.getSelectedFile();
+        if (fc.showSaveDialog(this) != JFileChooser.APPROVE_OPTION) return null;
+        Map<String, Object> p = new HashMap<>();
+        p.put("fichero", sel.name);
+        p.put("destino", fc.getSelectedFile().getAbsolutePath());
+        return p;
+    }
+
+    /** V9 H2.2 — «placa_bajar»: lo de Download…, sin los diálogos. */
+    private CompletableFuture<Resultado> bajar(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
+        final Backend b = this.backend;
+        Object f = p.get("fichero");
+        Object d = p.get("destino");
+        if (f == null || d == null) return listo(Resultado.mal("placa_bajar: faltan 'fichero' y 'destino'"));
+        final String ruta = f.toString();
+        final File out = new File(d.toString()).getAbsoluteFile();
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> {
-            byte[] data = b.get(sel.name);
+            byte[] data = b.get(ruta);
             Files.write(out.toPath(), data);
             return data.length;
-        }, n -> status.setText("Downloaded " + sel.name + " → "
-                + out.getName() + " (" + n + " bytes)"));
+        }, n -> {
+            status.setText("Downloaded " + ruta + " → " + out.getName() + " (" + n + " bytes)");
+            fin.complete(Resultado.bien("bajado " + ruta + " → " + out + " (" + n + " bytes)").con("bytes", n)
+                    .con("destino", out.toString()));
+        }, motivo -> fin.complete(Resultado.mal("placa_bajar: " + motivo)));
+        return fin;
     }
 
     /** H12 / #231 — abre el fichero seleccionado en una ventana visor-editor.
@@ -2560,11 +2670,12 @@ public final class PicoExplorer extends JPanel {
      *  <p>Lo que falla NO detiene al resto: se borra lo que se pueda y al final
      *  se dice qué no se pudo y por qué. Pararse en el primer error dejaría el
      *  lote a medias sin decir por dónde iba, que es peor que terminar. */
-    private void onDelete() {
-        if (!isConnected()) return;
-        final Backend b = this.backend;
+    /** V9 H2.2 — desde la ventana, «placa_borrar»: lo seleccionado, con su confirmación de siempre; null si no hay
+     *  nada seleccionado o no se confirma. */
+    private Map<String, Object> pideBorrado() {
+        if (!isConnected()) return null;
         final java.util.List<Backend.Entry> sels = getSelectedEntries();
-        if (sels.isEmpty()) return;
+        if (sels.isEmpty()) return null;
 
         String msg;
         if (sels.size() == 1) {
@@ -2579,15 +2690,29 @@ public final class PicoExplorer extends JPanel {
             msg = sb.toString();
         }
         if (JOptionPane.showConfirmDialog(this, msg, "Confirmar",
-                JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return;
+                JOptionPane.YES_NO_OPTION) != JOptionPane.YES_OPTION) return null;
+        Map<String, Object> p = new HashMap<>();
+        List<String> rutas = new ArrayList<>();
+        for (Backend.Entry e : sels) rutas.add(e.name);
+        p.put("ficheros", rutas);
+        return p;
+    }
 
+    /** V9 H2.2 — «placa_borrar»: lo de Delete, sin la confirmación (por su nombre, la lista ES lo que se confirma). El
+     *  resultado, con el árbol ya refrescado: cuántos, y los que no se pudieron borrar, con su motivo. */
+    private CompletableFuture<Resultado> borrar(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
+        final Backend b = this.backend;
+        final List<String> sels = rutasDe(p.get("ficheros"));
+        if (sels.isEmpty()) return listo(Resultado.mal("placa_borrar: falta el parámetro 'ficheros'"));
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> {
             int hechos = 0;
             StringBuilder fallos = new StringBuilder();
-            for (Backend.Entry e : sels) {
-                try { b.del(e.name); hechos++; }
+            for (String e : sels) {
+                try { b.del(e); hechos++; }
                 catch (java.io.IOException ex) {
-                    fallos.append("\n   ").append(e.name).append(": ").append(ex.getMessage());
+                    fallos.append("\n   ").append(e).append(": ").append(ex.getMessage());
                 }
             }
             return new Object[] { hechos, fallos.toString() };
@@ -2599,8 +2724,13 @@ public final class PicoExplorer extends JPanel {
                 outputSink.accept("[Explorer] no se pudieron borrar " + (sels.size() - hechos)
                         + " fichero(s):" + fallos);
             }
-            onRefresh();                       // UNO, al final
-        });
+            Resultado res = (hechos == sels.size() ? Resultado.bien("borrados " + hechos)
+                                                   : Resultado.mal("borrados " + hechos + " de " + sels.size()))
+                    .con("borrados", hechos);
+            if (!fallos.isEmpty()) res.con("fallos", fallos.trim());
+            refresca().whenComplete((x, ex) -> fin.complete(res));   // UNO, al final
+        }, motivo -> fin.complete(Resultado.mal("placa_borrar: " + motivo)));
+        return fin;
     }
 
     /** IDE-7 — las Entry de TODO lo seleccionado (las carpetas se ignoran: son
@@ -2620,36 +2750,50 @@ public final class PicoExplorer extends JPanel {
         return out;
     }
 
-    private void onSave() {
-        if (!isConnected()) return;
+    /** V9 H2.2 — «placa_guardar»: lo de Save (el FS de la placa, a su flash). */
+    private CompletableFuture<Resultado> guardaElFs(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
         final Backend b = this.backend;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         status.setText("Saving FS...");
-        runAsync(() -> { b.save(); return null; },
-                v -> status.setText("FS saved (or no-op si VM Java)"));
+        runAsync(() -> { b.save(); return null; }, v -> {
+            status.setText("FS saved (or no-op si VM Java)");
+            fin.complete(Resultado.bien("FS guardado (con la VM Java, no hace nada)"));
+        }, motivo -> fin.complete(Resultado.mal("placa_guardar: " + motivo)));
+        return fin;
     }
 
-    private void onLog() {
-        if (!isConnected()) return;
+    /** V9 H2.2 — «placa_log»: el log persistente de la placa. En datos, su texto; la ventana lo enseña en su diálogo,
+     *  como siempre. */
+    private CompletableFuture<Resultado> elLog(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
         final Backend b = this.backend;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(b::log, txt -> {
             JTextArea area = new JTextArea(txt);
             area.setEditable(false);
             area.setFont(new Font("Consolas", Font.PLAIN, 11));
             JScrollPane sp = new JScrollPane(area);
             sp.setPreferredSize(new Dimension(600, 400));
-            JOptionPane.showMessageDialog(this, sp,
-                    "Persistent log — " + b.displayName(), JOptionPane.PLAIN_MESSAGE);
-        });
+            fin.complete(Resultado.bienConDialogo("el log de la placa (" + (txt == null ? 0 : txt.length())
+                            + " caracteres)", "Persistent log — " + b.displayName(), sp, JOptionPane.PLAIN_MESSAGE)
+                    .sobre(this).con("log", txt));
+        }, motivo -> fin.complete(Resultado.mal("placa_log: " + motivo)));
+        return fin;
     }
 
     /** Borra el log persistente del backend (RAM + flash en el Pico).
      *  Útil cuando estamos bisecting instrumentación y queremos partir
-     *  de un buffer limpio. */
-    private void onLogClear() {
-        if (!isConnected()) return;
+     *  de un buffer limpio. V9 H2.2: el comando «placa_borrar_log». */
+    private CompletableFuture<Resultado> borraElLog(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
         final Backend b = this.backend;
-        runAsync(() -> { b.clearLog(); return null; },
-                v -> status.setText("Log borrado en " + b.displayName()));
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        runAsync(() -> { b.clearLog(); return null; }, v -> {
+            status.setText("Log borrado en " + b.displayName());
+            fin.complete(Resultado.bien("log borrado en " + b.displayName()));
+        }, motivo -> fin.complete(Resultado.mal("placa_borrar_log: " + motivo)));
+        return fin;
     }
 
     /**
@@ -2729,13 +2873,20 @@ public final class PicoExplorer extends JPanel {
         }.execute();
     }
 
-    private void onReset() {
-        if (!isConnected()) return;
-        final Backend b = this.backend;
+    /** V9 H2.2 — desde la ventana, «placa_reiniciar» pide su confirmación de siempre; null si no se confirma. */
+    private Map<String, Object> pideElReinicio() {
+        if (!isConnected()) return null;
         int rc = JOptionPane.showConfirmDialog(this,
                 "Reiniciar el backend? La conexión se cerrará.",
                 "Confirmar reset", JOptionPane.YES_NO_OPTION);
-        if (rc != JOptionPane.YES_OPTION) return;
+        return rc == JOptionPane.YES_OPTION ? new HashMap<>() : null;
+    }
+
+    /** V9 H2.2 — «placa_reiniciar»: lo de Reset, sin la confirmación: reinicia la placa y cierra la conexión. */
+    private CompletableFuture<Resultado> reinicia(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
+        final Backend b = this.backend;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> { b.reset(); return null; },
                 v -> {
                     backend.close();
@@ -2744,7 +2895,9 @@ public final class PicoExplorer extends JPanel {
                     treeModel.reload();
                     setConnectedUI(false);
                     status.setText("Reset sent, conexión cerrada");
-                });
+                    fin.complete(Resultado.bien("reset enviado; la conexión se cerró"));
+                }, motivo -> fin.complete(Resultado.mal("placa_reiniciar: " + motivo)));
+        return fin;
     }
 
     /**
@@ -2805,24 +2958,32 @@ public final class PicoExplorer extends JPanel {
     }
 
     /** H7 / #230 — botón INFO: micro, flash, RAM y PSRAM del dispositivo. */
-    private void onInfo() {
-        if (!isConnected()) return;
+    /** V9 H2.2 — «placa_info»: el INFO de la placa. En datos, el INFO entero (lo que dice el firmware) y su texto; la
+     *  ventana lo enseña en su diálogo, como siempre. */
+    private CompletableFuture<Resultado> elInfo(Map<String, Object> p) {
+        if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
         final BpvmClient dc = debugClient();
         if (dc == null) {
-            JOptionPane.showMessageDialog(this,
-                    "INFO no disponible para este backend.",
-                    "Device INFO", JOptionPane.WARNING_MESSAGE);
-            return;
+            return listo(Resultado.aviso("Device INFO", "INFO no disponible para este backend.",
+                    JOptionPane.WARNING_MESSAGE).sobre(this));
         }
         final Backend b = this.backend;
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         runAsync(() -> dc.getInfo(4000), m -> {
-            if (m == null) { status.setText("INFO sin respuesta"); return; }
-            JTextArea area = new JTextArea(formatInfo(m));
+            if (m == null) {
+                status.setText("INFO sin respuesta");
+                fin.complete(Resultado.mal("placa_info: INFO sin respuesta"));
+                return;
+            }
+            String texto = formatInfo(m);
+            JTextArea area = new JTextArea(texto);
             area.setEditable(false);
             area.setFont(new Font("Consolas", Font.PLAIN, 12));
-            JOptionPane.showMessageDialog(this, new JScrollPane(area),
-                    "Device INFO — " + b.displayName(), JOptionPane.PLAIN_MESSAGE);
-        });
+            fin.complete(Resultado.bienConDialogo("INFO de " + istr(m, "boardName"), "Device INFO — "
+                            + b.displayName(), new JScrollPane(area), JOptionPane.PLAIN_MESSAGE)
+                    .sobre(this).con("info", m).con("texto", texto));
+        }, motivo -> fin.complete(Resultado.mal("placa_info: " + motivo)));
+        return fin;
     }
 
     /** Formatea el Map del INFO_REPLY (H7: micro/flash/RAM/PSRAM). */

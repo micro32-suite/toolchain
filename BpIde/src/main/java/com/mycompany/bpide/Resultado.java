@@ -25,6 +25,11 @@ public final class Resultado {
     final String tituloDialogo;
     /** El tipo de ese diálogo (JOptionPane.INFORMATION_MESSAGE, WARNING_MESSAGE, ERROR_MESSAGE). */
     final int tipoDialogo;
+    /** Lo que enseña ese diálogo si no es el mensaje: un componente (el log o el INFO de la placa, en un área con su
+     *  barra), como antes de los comandos. null: el mensaje. */
+    private Object contenidoDialogo;
+    /** Sobre qué componente sale el diálogo (el panel de la placa, como antes); null: la ventana. */
+    private java.awt.Component padreDialogo;
 
     private Resultado(boolean ok, String mensaje, String tituloDialogo, int tipoDialogo) {
         this.ok = ok;
@@ -46,6 +51,30 @@ public final class Resultado {
     /** No fue bien, y la ventana lo enseña en un diálogo, como antes de los comandos. */
     public static Resultado aviso(String titulo, String mensaje, int tipo) {
         return new Resultado(false, mensaje, titulo, tipo);
+    }
+
+    /** Fue bien, y la ventana enseña `contenido` (un componente: el log o el INFO de la placa, en un área con su barra)
+     *  en un diálogo, como antes de los comandos. A quien lo llame por su nombre le bastan el mensaje y los datos. */
+    public static Resultado bienConDialogo(String mensaje, String titulo, Object contenido, int tipo) {
+        Resultado r = new Resultado(true, mensaje, titulo, tipo);
+        r.contenidoDialogo = contenido;
+        return r;
+    }
+
+    /** El diálogo, sobre ese componente (el panel de la placa, como antes); y devuelve el mismo resultado. */
+    public Resultado sobre(java.awt.Component padre) {
+        this.padreDialogo = padre;
+        return this;
+    }
+
+    /** Lo que enseña el diálogo: el contenido, o el mensaje. */
+    Object loQueEnsena() {
+        return contenidoDialogo != null ? contenidoDialogo : mensaje;
+    }
+
+    /** Sobre qué sale el diálogo: el padre que se le dio, o `ventana`. */
+    java.awt.Component padre(java.awt.Component ventana) {
+        return padreDialogo != null ? padreDialogo : ventana;
     }
 
     /** Añade un dato y devuelve el mismo resultado (se llena donde se crea). */

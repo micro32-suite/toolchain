@@ -187,7 +187,8 @@ public final class Comandos {
      *  ventana que llama a la lógica sin pasar por un comando (el doble clic del árbol). */
     public void muestra(Resultado r) {
         if (r == null || r.tituloDialogo == null) return;
-        Runnable aviso = () -> JOptionPane.showMessageDialog(ventana, r.mensaje, r.tituloDialogo, r.tipoDialogo);
+        Runnable aviso = () -> JOptionPane.showMessageDialog(r.padre(ventana), r.loQueEnsena(), r.tituloDialogo,
+                r.tipoDialogo);
         if (SwingUtilities.isEventDispatchThread()) aviso.run();
         else SwingUtilities.invokeLater(aviso);
     }
