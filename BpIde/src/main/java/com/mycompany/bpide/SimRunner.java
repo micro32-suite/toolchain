@@ -7,9 +7,10 @@
 // protocolo: sólo localizar el binario, lanzarlo con la config del
 // usuario, esperar a que escuche y matarlo al terminar.
 //
-// La "flash" y la imagen del FS viven en simDataDir y PERSISTEN entre
-// arranques, como en una placa: si subes un fichero y paras el
-// simulador, al volver sigue ahí. Borrar esa carpeta = placa nueva.
+// La "flash", la imagen del FS y —desde V9 (#809)— la zona de packs
+// viven en simDataDir y PERSISTEN entre arranques, como en una placa:
+// si subes un fichero o grabas un pack y paras el simulador, al volver
+// sigue ahí. Borrar esa carpeta = placa nueva.
 // ============================================================
 package com.mycompany.bpide;
 
@@ -136,15 +137,27 @@ public final class SimRunner {
          * cualquier cosa de la librería muere con "falta el modulo Core en el
          * FS". Montar los packs es el equivalente honesto: el código se ejecuta
          * XIP desde la zona de packs, sin copiarlo al FS, igual que en placa. */
+        /* V9 #809 — la zona de packs, PERMANENTE, en micro.packs (como micro.flash): lo que se graba desde el panel de
+         * Packs se queda al cerrar. Y la librería se graba sólo con la zona VIRGEN —el primer arranque, o tras borrar
+         * la carpeta del simulado—, como en una placa (Eduardo, 22-nov: «Sólo la 1ª vez»): después, lo instalado se
+         * queda, y se cambia desde el panel de Packs. */
+        Path zonaPacks = dataDir.resolve("micro.packs");
+        boolean virgen = !Files.exists(zonaPacks);
+        cmd.add("--packs-file=" + zonaPacks);
         int nPacks = 0;
-        for (Path p : packsToBurn(prefs)) {
-            cmd.add("--pack=" + p);
-            nPacks++;
+        if (virgen) {
+            for (Path p : packsToBurn(prefs)) {
+                cmd.add("--pack=" + p);
+                nPacks++;
+            }
+            if (nPacks == 0)
+                say("[sim] aviso: sin librería de packs — los programas que usen la "
+                  + "stdlib fallarán con 'falta el modulo Core'. Configúrala en el "
+                  + "engranaje del micro simulado.\n");
+        } else {
+            say("[sim] la zona de packs, la de la última vez (" + zonaPacks.getFileName() + "): para cambiar un pack,"
+              + " el panel de Packs; borrar la carpeta del simulado es una placa nueva\n");
         }
-        if (nPacks == 0)
-            say("[sim] aviso: sin librería de packs — los programas que usen la "
-              + "stdlib fallarán con 'falta el modulo Core'. Configúrala en el "
-              + "engranaje del micro simulado.\n");
 
         say("[sim] " + String.join(" ", cmd) + "\n");
         ProcessBuilder pb = new ProcessBuilder(cmd);
