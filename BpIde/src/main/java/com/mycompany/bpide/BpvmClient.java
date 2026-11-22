@@ -256,7 +256,9 @@ public final class BpvmClient implements AutoCloseable {
             this.inRaw  = conLatido(new BufferedInputStream(socket.getInputStream()));
         } catch (IOException e) {
             throw new IOException("no se pudo conectar a la VM remota " + host + ":" + port
-                    + " — ¿está corriendo `bpgenvm --listen " + port + " --workdir ...` allí?", e);
+                    + " — ¿está en marcha? Si es este PC, «Arrancar», en el panel de la placa, la pone en marcha;"   // V9 #848
+                    + " si es otro, allí: java -cp <jar del IDE> edu.bpgenvm.Main --listen " + port
+                    + " --workdir <carpeta>", e);
         }
         startReaderThread();
         doHandshake();
@@ -1974,6 +1976,18 @@ public final class BpvmClient implements AutoCloseable {
 
     private void spawnVmProcess(int port, String modOrProject, String workdir, boolean waitClient,
                                 String stdlibDir) throws IOException {
+        List<String> argv = ordenVmJava(port, workdir, flashDir, stdlibDir, waitClient, modOrProject);
+        ProcessBuilder pb = new ProcessBuilder(argv);
+        pb.redirectErrorStream(false);
+        this.process = pb.start();
+        startStderrPump();
+        diag("[BpvmClient] subproceso lanzado en puerto " + port);
+    }
+
+    /** V9 #848 — la orden que lanza la VM Java del PC como servidor del wire. Una sola forma de lanzarla: la usan el
+     *  Run ({@link #spawnVmProcess}) y el «Arrancar» del panel de la placa ({@link VmJavaRunner}). */
+    static List<String> ordenVmJava(int port, String workdir, String flashDir, String stdlibDir, boolean waitClient,
+                                    String modOrProject) {
         String javaBin = System.getProperty("java.home") + File.separator + "bin"
                 + File.separator + "java";
         if (System.getProperty("os.name", "").toLowerCase().contains("win")) {
@@ -2013,12 +2027,7 @@ public final class BpvmClient implements AutoCloseable {
             argv.add(stdlibDir);
         }
         if (modOrProject != null) argv.add(modOrProject);
-
-        ProcessBuilder pb = new ProcessBuilder(argv);
-        pb.redirectErrorStream(false);
-        this.process = pb.start();
-        startStderrPump();
-        diag("[BpvmClient] subproceso lanzado en puerto " + port);
+        return argv;
     }
 
     private static String locateBpgenvmJar() {

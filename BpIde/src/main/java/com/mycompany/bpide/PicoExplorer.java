@@ -101,6 +101,9 @@ public final class PicoExplorer extends JPanel {
     private final JButton btnSim    = new JButton("Arrancar");
     private final JButton btnSimCfg = new JButton();
     private final SimRunner sim = new SimRunner(this::emitLine);
+    /** V9 #848 — «VM Java (TCP v1)» sólo se conectaba a una VM ya en marcha: su «Arrancar», como el del simulado. */
+    private final JButton btnVm = new JButton("Arrancar");
+    private final VmJavaRunner vmJava = new VmJavaRunner(this::emitLine);
     private final JButton btnConnect = new JButton("Connect");
     private final JButton btnRefresh = new JButton("Refresh");
     private final JButton btnUpload  = new JButton("Upload…");
@@ -160,6 +163,7 @@ public final class PicoExplorer extends JPanel {
         JPanel vmCard = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 0));
         vmCard.add(new JLabel("Endpoint:"));
         vmCard.add(endpointField);
+        vmCard.add(btnVm);
         // H10 — el micro simulado no pide endpoint: lo arranca el IDE y sabe dónde
         // escucha. Lo que va aquí es su ESTADO y los dos botones (marcha/paro +
         // engranaje de configuración).
@@ -189,6 +193,10 @@ public final class PicoExplorer extends JPanel {
          * quedaría huérfano ocupando el puerto → al siguiente arranque "no
          * aceptó conexiones" sin motivo aparente. */
         Runtime.getRuntime().addShutdownHook(new Thread(sim::stop, "bpvm-sim-stop"));
+        btnVm.setIcon(SimIcons.chip(14));
+        btnVm.setToolTipText("Arranca una VM Java en este PC, en el puerto del endpoint, y se conecta a ella");
+        btnVm.addActionListener(e -> onToggleVm());
+        Runtime.getRuntime().addShutdownHook(new Thread(vmJava::stop, "vm-java-stop"));   // lo mismo: sin huérfanos
 
         JPanel row1 = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 2));
         row1.add(endpointPanel);
@@ -1754,6 +1762,57 @@ public final class PicoExplorer extends JPanel {
         }.execute();
     }
 
+    /* ===== V9 #848 — la VM Java del PC como placa: arranque y parada ===== */
+
+    /** Refresca el botón de la VM Java (texto + color del chip), como {@link #updateSimUI}. */
+    private void updateVmUI() {
+        boolean run = vmJava.isRunning();
+        btnVm.setText(run ? "Parar" : "Arrancar");
+        btnVm.setIcon(SimIcons.chip(14, run ? new Color(0x1B, 0x8A, 0x3C) : null));
+        btnVm.setEnabled(true);
+    }
+
+    /** Botón de la VM Java: la arranca en el puerto del endpoint (si es de este PC) y se conecta; o desconecta y la
+     *  para. Como {@link #onToggleSim}, con su worker propio para atender el fallo. */
+    private void onToggleVm() {
+        if (!btnVm.isEnabled()) return;           // ya hay un arranque en curso
+        if (vmJava.isRunning()) {
+            if (isConnected()) onConnect();       // toggle: aquí desconecta
+            vmJava.stop();
+            updateVmUI();
+            status.setText("VM Java parada");
+            return;
+        }
+        final int port = VmJavaRunner.puertoLocal(endpointField.getText());
+        if (port < 0) {
+            status.setText("«Arrancar» pone una VM Java en ESTE PC: el endpoint, localhost:puerto");
+            return;
+        }
+        rbVm.setSelected(true);
+        showCard(CARD_VM);
+        status.setText("arrancando la VM Java…");
+        btnVm.setEnabled(false);
+        new SwingWorker<String, Void>() {
+            @Override protected String doInBackground() throws Exception {
+                return vmJava.start(port);
+            }
+            @Override protected void done() {
+                try {
+                    String endpoint = get();
+                    updateVmUI();
+                    status.setText("VM Java en " + endpoint + " — conectando…");
+                    if (!isConnected()) onConnect();   // ya escucha: conectar de verdad
+                } catch (Exception ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
+                    status.setText("no arrancó la VM Java");
+                    emitLine("[vm-java ERROR] " + msg + "\n");
+                    updateVmUI();
+                }
+            }
+        }.execute();
+    }
+
     /** Botón del engranaje: la ventana de configuración del micro simulado. */
     private void onSimConfig() {
         IdePrefs prefs = IdePrefs.load();
@@ -1795,6 +1854,7 @@ public final class PicoExplorer extends JPanel {
         portCombo.setEnabled(!connected);
         endpointField.setEnabled(!connected);
         updateSimUI();
+        updateVmUI();
         btnRefresh.setEnabled(connected);
         btnUpload.setEnabled(connected);
         btnRun.setEnabled(connected);
