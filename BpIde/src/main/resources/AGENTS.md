@@ -29,6 +29,7 @@ bp build X.bp        # compiles: out/X.mod next to the source. A project: bp bui
 bp run X.bp          # compiles if needed and runs it on the Java VM
 bp run --c X.bp      # the same on the C VM (the one in the boards)
 bp api Collections   # the API of a module (bp api alone: the modules you can import)
+bp test              # the tests in tests/, on both VMs (see Tests, below)
 bp help              # the rest: bp png (a screen capture to PNG), bp frontend and bp vm (all the options)
 ```
 
@@ -43,6 +44,24 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
   function (`  en X.bp:8 (Main)`, `  llamado desde …`).
 - What the program prints on the PC is what it will print on a board: make it print what it does, and check that.
 - Options for the VM go before the program: `bp run --no-screen X.bp` (a GUI without a window; also with `--c`).
+
+## Tests
+
+`bp test` runs the programs in `tests/` (or the ones you name) on both PC VMs, with no screen and a time limit. A test
+passes if it compiles, ends with 0, prints the same on both and, if it has its `X.out` beside it, prints exactly that
+(`bp test --guarda` writes them from what they print now: read them before keeping them). In a project folder (its
+`.bpbuild`), it compiles the project first, and the tests import its modules. One line per test, a failing one with
+its reason; it exits with 0 if all pass. The checks, with the `Assert` module (`bp api Assert`):
+
+```
+import Assert
+Assert.equals(4, suma(2, 2))              // integer, long, double, string or boolean: expected, actual
+Assert.equals("abc", s, "the name")       // with what is checked, in front of the failure
+Assert.isTrue(l.length() > 0, "not empty")
+```
+
+A failing check throws `Assert.Failure`: the test ends with 1, and its trace says the line. A project with two tests,
+one of them a GUI: `samples/pruebas`.
 
 ## On a board or the simulated micro, without the IDE
 
@@ -139,10 +158,11 @@ the same, with the same names and the same traps as above.
 - The screen size depends on where it runs: 480x320 on the PC (unless `--screen=WxH`), the one in its settings on the
   simulated micro, the panel's on a board. Lay out with `align` relative to the screen, not with fixed coordinates.
 - A button whose size you set by hand does not center its text: `btn.childAt(0).align(Gui.Align.CENTER, 0, 0)`.
-- To test it with nobody in front of it:
-  - `print Gui.__guiDumpTree()` dumps the widget tree as text: compare that.
-  - `Gui.__guiClick(widget)` simulates a click. Without a screen, the GUI loop ends as soon as it has nothing to do:
-    do it before `Gui.run()`, which handles it and returns; after that, it is an error that says so.
+- To test it with nobody in front of it (a test in `tests/`, run by `bp test`: see Tests, above):
+  - `print Gui.dumpTree()` dumps the widget tree as text: compare that (its `.out`), and check with `Assert`.
+  - `Gui.click(widget)` simulates a click; `Gui.change(widget)`, a change of value (its `onChange`; the value, the one
+    you set). Without a screen, the GUI loop ends as soon as it has nothing to do: do it before `Gui.run()`, which
+    handles it and returns; after that, it is an error that says so.
   - Make the program end by itself: `Gui.start()` … `Gui.stop()` and `Gui.join()`. With a window, `Gui.run()` only
     returns when someone calls `Gui.stop()` or closes it.
   - `Gui.shot("X.shot")` writes a capture (call `sleep(300)` before, so the screen gets painted), and
@@ -150,7 +170,8 @@ the same, with the same names and the same traps as above.
     Java VM paints with Swing, an approximation. On a board, the capture stays in its file system (a relative path,
     at its root): download it (`bp placa COM22 get X.shot`; with the IDE, `placa_bajar`) and turn it into a PNG the
     same way.
-- Models to copy: `samples/GuiShot.bp`, `samples/GuiClickDemo.bp`, `samples/ChartDemo.bp`.
+- Models to copy: `samples/GuiShot.bp`, `samples/GuiClickDemo.bp`, `samples/ChartDemo.bp`, and a GUI that tests
+  itself, `samples/pruebas/tests/PruebaGui.bp`.
 
 ## Hardware
 

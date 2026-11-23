@@ -65,6 +65,7 @@ public final class Bp {
             case "vm":       return vm(resto);
             case "placa":    return placa(resto);   // V9 #857
             case "api":      return api(resto);     // V9 #858
+            case "test":     return Pruebas.ejecuta(resto);   // V9 #859
             default:
                 System.err.println("bp: orden desconocida: " + orden);
                 ayuda(System.err);
@@ -87,6 +88,11 @@ public final class Bp {
         out.println("        haga falta, como el IDE, y lo ejecuta; su salida y su código, como con las VMs del PC");
         out.println("  bp placa <COM22 | IP | sim> ls [ruta] | get <ruta> [fichero] | stop | info");
         out.println("        lista sus ficheros, baja uno (una captura: get /X.shot), para lo que corre, su INFO");
+        out.println("  bp test [--guarda] [--tiempo=N] [<proyecto.bpbuild>] [<carpeta | prueba.bp …>]");
+        out.println("        las pruebas: los programas de tests/ (o los que se le den), en las dos VMs del PC, sin");
+        out.println("        pantalla; cada una está bien si acaba con 0, imprime lo mismo en las dos y, si tiene su");
+        out.println("        X.out al lado, imprime eso (--guarda lo escribe). En un proyecto, lo compila antes.");
+        out.println("        Sale con 0 si todas están bien. Las comprobaciones, con el módulo Assert");
         out.println("  bp api [<Módulo | programa.mod>] [--todo]");
         out.println("        la API de un módulo, en BP: sus declaraciones públicas, sin los cuerpos (lo encuentra como");
         out.println("        `import`: la stdlib, las librerías del BpVM.cfg, los packs); con --todo, también lo que ve");
