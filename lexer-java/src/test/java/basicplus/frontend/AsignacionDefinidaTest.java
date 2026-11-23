@@ -63,13 +63,16 @@ class AsignacionDefinidaTest {
         return new String(buf.toByteArray(), StandardCharsets.UTF_8);
     }
 
-    /** Las de «sin valor» de una salida del compilador, como «linea:'var'» (la línea sale como [l:c]). */
+    /** Las de «sin valor» de una salida del compilador, como «linea:'var'» (la línea sale como «fichero:l:c: …»: V9
+     *  #856; antes, «[l:c] …»). */
     private static List<String> sinValorEn(String salida) {
         List<String> r = new ArrayList<>();
+        java.util.regex.Pattern pos = java.util.regex.Pattern.compile(":(\\d+):\\d+: ");
         for (String l : salida.split("\n")) {
             if (!l.contains("se usa sin tener valor")) continue;
-            int a = l.indexOf('['), c = l.indexOf(':', a), q = l.indexOf('\''), q2 = l.indexOf('\'', q + 1);
-            r.add(l.substring(a + 1, c) + ":" + l.substring(q, q2 + 1));
+            java.util.regex.Matcher m = pos.matcher(l);
+            int q = l.indexOf('\''), q2 = l.indexOf('\'', q + 1);
+            r.add((m.find() ? m.group(1) : "?") + ":" + l.substring(q, q2 + 1));
         }
         return r;
     }

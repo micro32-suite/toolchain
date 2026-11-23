@@ -30,7 +30,9 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
 
 - `bp run` exits with the program's code: 0 if it ends well, 1 with an uncaught exception, 2 if it does not compile
   (then the errors go to stderr and nothing runs).
-- Errors come as `[line:column] error …`. Read the whole message: it usually says how to fix it.
+- Errors come with their file, line and column: `App.bp:7:15: error semántico: …` (also those of an imported module,
+  with its own file). Read the whole message: it usually says how to fix it. `bp build` says only that, or
+  `compilado: out/X.mod`.
 - On stdout, only what the program prints, the same in both VMs: `bp run X.bp > out.txt` keeps just that. The VMs'
   own lines (`[miVM] …`, `[bpvm] …`) go to stderr.
 - An uncaught exception says where, on stderr: `=== traza: X+122 X+39 ===`, and under it the file, the line and the

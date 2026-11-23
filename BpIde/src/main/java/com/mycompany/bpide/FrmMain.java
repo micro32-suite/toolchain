@@ -168,12 +168,14 @@ public class FrmMain extends javax.swing.JFrame
         }
     }
     private final java.util.Map<java.awt.Component, OpenFile> openFiles = new java.util.HashMap<>();
-    /** Patrón de líneas de diagnóstico del frontend BP: "[L:C] error/aviso categoría: msg".
+    /** Patrón de líneas de diagnóstico del frontend BP: "fichero:L:C: error/aviso categoría: msg" (V9 #856: la forma
+     *  de gcc, con el fichero de cada error; la ruta, desde donde corre el compilador —aquí, el IDE— o entera, y puede
+     *  llevar la letra de la unidad: «C:\x\App.bp:7:15: …», de ahí el no-voraz).
      *  Importante: la categoría puede contener acentos ("sintáctico", "semántico");
      *  usamos \\S+? (no-greedy non-whitespace) en vez de \\w+ porque \\w no acepta
      *  caracteres no-ASCII por defecto en Java. */
     private static final Pattern ERROR_RE = Pattern.compile(
-            "\\[(\\d+):(\\d+)\\]\\s+(error|aviso)\\s+(\\S+?):\\s+(.*)");
+            "^(.+?):(\\d+):(\\d+):\\s+(error|aviso)\\s+(\\S+?):\\s+(.*)$");
 
     // ---- Estado de depuración ----
     /** Sesión de depuración compartida entre runs. Breakpoints persisten. */
@@ -586,6 +588,10 @@ public class FrmMain extends javax.swing.JFrame
                     int row = jTable1.getSelectedRow();
                     if (row >= 0 && row < errors.size()) {
                         CompileError ce = errors.get(row);
+                        // V9 #856 — el error es de SU fichero: si no es el de la pestaña activa, se abre (o se va al suyo)
+                        if (ce.ruta != null && !ce.ruta.equals(currentFile) && Files.isRegularFile(ce.ruta)) {
+                            openFileInEditor(ce.ruta);
+                        }
                         jumpToLine(ce.line);
                     }
                 }
@@ -1286,6 +1292,7 @@ public class FrmMain extends javax.swing.JFrame
         for (CompileError ce : errors.snapshot()) {
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("fichero", ce.file);
+            if (ce.ruta != null) m.put("ruta", ce.ruta.toString());   // V9 #856: la del error, entera
             m.put("linea", ce.line);
             m.put("columna", ce.column);
             m.put("tipo", ce.kind);
@@ -2873,7 +2880,8 @@ public class FrmMain extends javax.swing.JFrame
         comandos.registra("compilar", "Compile", p -> compilarOEjecutar(false, p))
                 .ayuda("Compilar")
                 .explica("Compila a .mod el fuente de la pestaña activa (o el proyecto abierto). Devuelve los errores"
-                        + " (fichero, línea, columna, tipo y mensaje) y la salida del compilador.")
+                        + " (fichero, su ruta, línea, columna, tipo y mensaje: cada uno, el del módulo en que está) y la"
+                        + " salida del compilador.")
                 .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("ejecutar", "Run", p -> compilarOEjecutar(true, p))
@@ -4785,15 +4793,23 @@ public class FrmMain extends javax.swing.JFrame
      * automáticamente.
      */
     private void parseAndAddError(String line) {
-        Matcher m = ERROR_RE.matcher(line);
+        Matcher m = ERROR_RE.matcher(line.trim());
         if (!m.find()) return;
-        int ln       = Integer.parseInt(m.group(1));
-        int col      = Integer.parseInt(m.group(2));
-        String kind  = m.group(3);            // "error" / "aviso"
-        String cat   = m.group(4);            // "sintáctico" / "semántico"
-        String msg   = m.group(5).trim();
-        String fname = currentFile != null ? currentFile.getFileName().toString() : "?";
-        CompileError ce = new CompileError(fname, ln, col, kind, cat, msg);
+        /* V9 #856 — el fichero, el del error (antes, el de la pestaña activa: uno de otro módulo se marcaba en el
+         * equivocado). Una ruta relativa es desde donde corre el compilador, que es el propio IDE. */
+        java.nio.file.Path ruta;
+        try {
+            ruta = java.nio.file.Paths.get(m.group(1)).toAbsolutePath().normalize();
+        } catch (java.nio.file.InvalidPathException ex) {
+            ruta = null;
+        }
+        int ln       = Integer.parseInt(m.group(2));
+        int col      = Integer.parseInt(m.group(3));
+        String kind  = m.group(4);            // "error" / "aviso"
+        String cat   = m.group(5);            // "sintáctico" / "semántico"
+        String msg   = m.group(6).trim();
+        String fname = ruta != null && ruta.getFileName() != null ? ruta.getFileName().toString() : m.group(1);
+        CompileError ce = new CompileError(fname, ruta, ln, col, kind, cat, msg);
         /* V9 H2.2 — en el hilo de la ventana (los process() de los SwingWorker), a la tabla YA: el done() corre en el
          * mismo evento que el último process(), y con un invokeLater el resultado del comando miraba la tabla antes de
          * que llegase el error (compilar daba «errores = []» con el error en la salida). Desde otro hilo, como antes. */

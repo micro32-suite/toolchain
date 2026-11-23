@@ -79,6 +79,6 @@ class EmisorConErroresTest {
         String t = (String) r[1];
         assertFalse((Boolean) r[0], "el build tiene que fallar:\n" + t);
         assertTrue(t.contains("'m' es un método, no un campo"), t);
-        assertTrue(t.contains("[12:"), "con la línea: " + t);
+        assertTrue(t.contains("Refl.bp:12:"), "con su fichero y su línea (V9 #856): " + t);
     }
 }

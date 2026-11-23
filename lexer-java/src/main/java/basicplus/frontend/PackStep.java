@@ -233,7 +233,7 @@ public final class PackStep {
                 if (sinStdlib && esDeLaStdlib(cierre.stdlibDir, canon)) { fueraStdlib.add(canon); continue; }   // #623
                 Path mod = localizarModulo(canon + ".mod", cierre.dondeBuscar, outDir);
                 if (mod == null) {
-                    System.out.println("pack: aviso — '" + canon + "' lo importa un modulo del pack y no se "
+                    Main.diag().println("pack: aviso — '" + canon + "' lo importa un modulo del pack y no se "   // V9 #856
                         + "encuentra en la stdlib ni en las dependencias: el pack lo necesitara de fuera");
                     continue;
                 }
@@ -357,7 +357,7 @@ public final class PackStep {
                   + (mainEntry.equals(proj.main) ? "" : ", cualificado por su `library`") + ")"
                 : "LIBRERIA (el modulo raiz no tiene `main`, y no le hace falta)"));
         if (!faltan.isEmpty())
-            System.out.println("pack: NECESITA ademas estos packs grabados: " + faltan
+            Main.diag().println("pack: NECESITA ademas estos packs grabados: " + faltan   // V9 #856: también con --quiet
                 + " — no van dentro, se graban aparte");
 
         // 4) empaquetar (Pack.jar = librería). fecha = ahora (la no-determinación

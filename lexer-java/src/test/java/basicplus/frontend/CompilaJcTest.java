@@ -123,18 +123,19 @@ class CompilaJcTest {
         Object[] lex = compila(tmp.resolve("lexico"), "Malo", "Malo.jc",
                 "module Malo\n{\n   string s = \"sin cerrar;\n}\n");
         assertFalse((Boolean) lex[0], (String) lex[1]);
-        assertTrue(((String) lex[1]).contains("[3:15] error léxico: literal de cadena sin cerrar"), (String) lex[1]);
+        // V9 #856: cada error, con su fichero delante («Malo.jc:3:15: …»; antes, «[3:15] …»)
+        assertTrue(((String) lex[1]).contains("Malo.jc:3:15: error léxico: literal de cadena sin cerrar"), (String) lex[1]);
 
         Object[] sin = compila(tmp.resolve("sintactico"), "Malo", "Malo.jc",
                 "module Malo\n{\n   public function void main()\n   {\n      int x = ;\n   }\n}\n");
         assertFalse((Boolean) sin[0], (String) sin[1]);
-        assertTrue(((String) sin[1]).contains("[5:15] error sintáctico: "), (String) sin[1]);
+        assertTrue(((String) sin[1]).contains("Malo.jc:5:15: error sintáctico: "), (String) sin[1]);
 
         // #845: el mensaje, sin el «(punto N)» del cuaderno de diseño, que el usuario no tiene
         Object[] mas = compila(tmp.resolve("delante"), "Malo", "Malo.jc",
                 "module Malo\n{\n   public function void main()\n   {\n      int i = 0;\n      do ++i; while (i < 3);\n   }\n}\n");
         assertFalse((Boolean) mas[0], (String) mas[1]);
-        assertTrue(((String) mas[1]).contains("[6:10] error sintáctico: en JC, ++ y -- van detrás: v++;"), (String) mas[1]);
+        assertTrue(((String) mas[1]).contains("Malo.jc:6:10: error sintáctico: en JC, ++ y -- van detrás: v++;"), (String) mas[1]);
         assertFalse(((String) mas[1]).contains("(punto"), (String) mas[1]);
     }
 

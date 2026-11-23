@@ -101,10 +101,11 @@ public final class Version {
      */
     public static void banner() {
         System.out.println(linea());
+        // V9 #856 — los avisos, por el canal de los diagnósticos: también con --quiet (la cabecera, no).
         String aviso = avisoDeDesfase();
-        if (aviso != null) System.out.println(aviso);
+        if (aviso != null) Main.diag().println(aviso);
         String avisoVm = avisoDeDesfaseDeLaVm();
-        if (avisoVm != null) System.out.println(avisoVm);
+        if (avisoVm != null) Main.diag().println(avisoVm);
     }
 
     /**

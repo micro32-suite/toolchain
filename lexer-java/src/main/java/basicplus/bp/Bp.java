@@ -127,8 +127,24 @@ public final class Bp {
             return 1;
         }
         cfgDeLaInstalacion();
-        Compilado c = compila(Paths.get(sueltos.get(0)), out);
+        /* V9 #856 (b) — como --quiet (Eduardo: «Sólo los errores, y bp lo usa»): los errores y avisos, cada uno con su
+         * fichero, y si compila, sólo dónde quedó el .mod. */
+        Runnable vuelve = Main.callaLoDemas();
+        Compilado c;
+        try {
+            c = compila(Paths.get(sueltos.get(0)), out);
+        } finally {
+            vuelve.run();
+        }
+        if (c.codigo == 0 && c.mod != null) System.out.println("compilado: " + rutaParaMostrar(c.mod));
         return c.codigo;
+    }
+
+    /** Una ruta, desde donde se trabaja si está dentro; si no, entera (la de los diagnósticos del compilador). */
+    static String rutaParaMostrar(Path p) {
+        Path abs = p.toAbsolutePath().normalize();
+        Path aqui = Paths.get("").toAbsolutePath().normalize();
+        return abs.startsWith(aqui) && !abs.equals(aqui) ? aqui.relativize(abs).toString() : abs.toString();
     }
 
     /** Lo que deja una compilación: su código (0, 1 o 2) y el .mod que hay que ejecutar. */
@@ -198,7 +214,13 @@ public final class Bp {
             try (PrintStream aqui = new PrintStream(lo, true, "UTF-8")) {
                 System.setOut(aqui);
                 System.setErr(aqui);
-                c = compila(fichero, null);
+                // V9 #856 (b) — y como --quiet: si no compila, se ven sólo los errores, cada uno con su fichero
+                Runnable vuelve = Main.callaLoDemas();
+                try {
+                    c = compila(fichero, null);
+                } finally {
+                    vuelve.run();
+                }
             } catch (IOException e) {
                 c = new Compilado(2, null);
             } finally {

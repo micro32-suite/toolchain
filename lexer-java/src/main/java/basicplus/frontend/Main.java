@@ -363,7 +363,7 @@ public final class Main {
         // de un tiron. Bloquear el build por eso convertiria la herramienta en
         // un estorbo (criterio de Eduardo).
         DaoGen.Resultado ver = DaoGen.verificar(proj);
-        for (String w : ver.avisos) System.out.println("aviso BD: " + w);
+        for (String w : ver.avisos) diag().println("aviso BD: " + w);   // V9 #856: un aviso, también con --quiet
         if (ver.resumen != null)    System.out.println("BD: " + ver.resumen);
 
         /* QUÉ SE COMPILA (V5/H8). Con `sources` lo dice el proyecto, uno a uno;
@@ -469,6 +469,53 @@ public final class Main {
         if (ctx.verbose && n > 0) System.out.println("  .bpi intermedios borrados: " + n);
     }
 
+    /* ===== V9 #856 — los diagnósticos, para que los lea una máquina ===== */
+
+    /** Por dónde salen los diagnósticos (errores y avisos): null, la salida estándar de cada momento (la que haya puesto
+     *  quien compila: el IDE la captura); con --quiet, la de verdad, mientras la otra se calla. */
+    private static volatile java.io.PrintStream diagnosticos = null;
+
+    /** El canal de los diagnósticos y los avisos: siempre se ven, también con --quiet. */
+    public static java.io.PrintStream diag() {
+        java.io.PrintStream d = diagnosticos;
+        return d != null ? d : System.out;
+    }
+
+    /**
+     * V9 #856 (b) — --quiet (Eduardo: «Sólo los errores, y bp lo usa»): a partir de aquí, por la salida estándar sólo
+     * los diagnósticos y los avisos ({@link #diag()}); lo demás (la cabecera, «>>> compile», las interfaces cargadas, el
+     * resumen, «compilado:»…) no sale. La salida de errores, como siempre («compilación abortada…»). Devuelve lo que
+     * hay que llamar para volver a como estaba (quien compila por dentro: bp).
+     */
+    public static Runnable callaLoDemas() {
+        final java.io.PrintStream real = System.out;
+        diagnosticos = real;
+        System.setOut(new java.io.PrintStream(new java.io.OutputStream() {
+            @Override public void write(int b) { }
+            @Override public void write(byte[] b, int off, int len) { }
+        }));
+        return () -> { System.setOut(real); diagnosticos = null; };
+    }
+
+    /** La ruta de un fuente para un diagnóstico: desde donde se compila, si está dentro; si no, entera. */
+    static String rutaParaMostrar(Path src) {
+        Path abs = src.toAbsolutePath().normalize();
+        Path aqui = Paths.get("").toAbsolutePath().normalize();
+        return abs.startsWith(aqui) && !abs.equals(aqui) ? aqui.relativize(abs).toString() : abs.toString();
+    }
+
+    /**
+     * V9 #856 (a) — un diagnóstico (léxico, sintáctico o semántico) con su fichero delante, en la forma de gcc (Eduardo:
+     * «El fichero delante, siempre»): de «[7:15] error semántico: …» a «App.bp:7:15: error semántico: …». El texto de
+     * los diagnósticos (su toString, el de las pruebas) no cambia: aquí se cambia su posición entre corchetes por la
+     * ruta y la posición.
+     */
+    static String conFichero(Path src, int linea, int columna, String texto) {
+        String pos = "[" + linea + ":" + columna + "] ";
+        String resto = texto.startsWith(pos) ? texto.substring(pos.length()) : texto;
+        return rutaParaMostrar(src) + ":" + linea + ":" + columna + ": " + resto;
+    }
+
     /** V9 #855 (d) — el uso, con las opciones de verdad (antes no nombraba --compile ni --backend, las de cada día).
      *  Con --help, a la salida estándar; sin fichero, a la de errores. */
     static void uso(java.io.PrintStream out) {
@@ -483,18 +530,27 @@ public final class Main {
         out.println("  --formato=8|9              el formato del .mod (por defecto, " + FORMATO + ")");
         out.println("  --prune-bpi                borra los .bpi del build al acabar");
         out.println("  --dao                      con --project: genera los DAOs de sus entidades, sin compilar");
-        out.println("Sin --compile (sólo analiza): --tokens (los tokens), --ast (el árbol), --quiet (ninguno)");
+        out.println("  --quiet                    sólo los errores y avisos; si compila, nada");
+        out.println("Sin --compile (sólo analiza): --tokens (los tokens), --ast (el árbol)");
         out.println("JC, BasicPlus con llaves (a la salida estándar; de un fichero, o de una carpeta al comprobar):");
         out.println("  --escribir-jc              BP -> JC");
         out.println("  --escribir-bp              JC -> BP");
         out.println("  --comprobar-jc             la ida y vuelta BP -> JC -> BP");
         out.println("  --comprobar-bp             la ida y vuelta BP -> BP (el escritor de BP)");
         out.println("  -h | --help                esta ayuda");
-        out.println("Sale con 0 si compila; con 2, si no (los errores, «[línea:columna] error ...»).");
+        out.println("Cada error y cada aviso, con su fichero: «App.bp:7:15: error semántico: ...». Sale con 0 si compila;");
+        out.println("con 2, si no.");
     }
 
     public static void main(String[] args)
     {
+        /* V9 #856 (c) — la salida, en UTF-8, como la de las VMs (la VM Java lo hace desde V2): en la de la plataforma
+         * (cp1252 en Windows) los acentos salían rotos en una consola UTF-8 («Diagn?sticos»), y también en la de `cmd`. */
+        try {
+            System.setOut(new java.io.PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8"));
+            System.setErr(new java.io.PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.err), true, "UTF-8"));
+        } catch (java.io.UnsupportedEncodingException imposible) { /* UTF-8 siempre está */ }
+        boolean silencio = false;   // V9 #856 (b): --quiet
         String path = null;
         String compileOutDir   = null;
         String interfaceOutDir = null;
@@ -528,7 +584,7 @@ public final class Main {
             else if ("--comprobar-jc".equals(a)) { comprobarJc = true; showAst = false; showTokens = false; }
             else if ("--prune-bpi".equals(a)) pruneBpi = true;
             else if ("--ast".equals(a))    showTokens = false;
-            else if ("--quiet".equals(a)) { showAst = false; showTokens = false; }
+            else if ("--quiet".equals(a)) { showAst = false; showTokens = false; silencio = true; }
             else if ("--compile".equals(a)) {
                 showAst = false; showTokens = false;
                 if (i + 1 < args.length) compileOutDir = args[++i];
@@ -587,6 +643,9 @@ public final class Main {
             else if (path == null)         path = a;
             else System.err.println("argumento extra ignorado: " + a);
         }
+        // V9 #856 (b) — --quiet (Eduardo: «Sólo los errores»): por la salida estándar, sólo los diagnósticos; si compila,
+        // nada. Con --escribir-bp/--escribir-jc no, que su salida es el fuente traducido.
+        if (silencio && !escribirBp && !escribirJc) callaLoDemas();
 
         // ============================================================
         // Modo proyecto (.bpbuild)
@@ -597,7 +656,7 @@ public final class Main {
                 // V5/H5 — avisos del proyecto (p.ej. `database` que no está).
                 // No impiden compilar, pero no pueden pasar callados.
                 for (String w : proj.warnings)
-                    System.out.println("aviso proyecto: " + w);
+                    diag().println("aviso proyecto: " + w);   // V9 #856: también con --quiet
                 if (daoBuild) { System.exit(generarDaos(proj) ? 0 : 2); return; }
                 // H3: el build de proyecto (compila + out:pack) vive en buildProject,
                 // reutilizado por el IDE → un solo camino de build.
@@ -692,7 +751,7 @@ public final class Main {
 
         SemanticAnalyzer analyzer = new SemanticAnalyzer();
         SemanticInfo info = analyzer.analyze(parsed.module);
-        printSemantics(info, parsed.module);
+        printSemantics(info, parsed.module, p, true);
         ctx.totalErrors += countSemErrors(info);
     }
 
@@ -839,7 +898,7 @@ public final class Main {
                         }
                         loadImportsForAnalyzer(parsed.module, src, ctx, recAnalyzer, depth + 1);
                         SemanticInfo recInfo = recAnalyzer.analyze(parsed.module);
-                        if (depth == 0) printSemantics(recInfo, parsed.module);
+                        printSemantics(recInfo, parsed.module, src, depth == 0);   // V9 #856: los de todos los módulos
                         ctx.totalErrors += countSemErrors(recInfo);
                     } catch (RuntimeException ignored) {
                         // AST demasiado roto para un análisis fiable: bastan
@@ -901,8 +960,10 @@ public final class Main {
 
             // 3) Análisis completo.
             SemanticInfo info = analyzer.analyze(module);
+            /* V9 #856 — los diagnósticos de TODOS los módulos, cada uno con su fichero: los de uno importado no salían
+             * (sólo «compilación abortada por errores semánticos en Lib.bp»). El resumen, sólo del raíz. */
+            printSemantics(info, module, src, depth == 0);
             if (depth == 0) {
-                printSemantics(info, module);
                 /* V5/H8 — ¿es EJECUTABLE lo que estamos construyendo? Lo dice
                  * tener `main`, no un campo del proyecto. Una librería no tiene
                  * por qué llevarlo (criterio de Eduardo), y así el manifest del
@@ -1153,7 +1214,7 @@ public final class Main {
             // No abortamos ante errores: en modo interface puede haber refs no
             // resueltas (a tipos importados). Sólo contamos diagnósticos para
             // información. La extracción saltará firmas no exportables.
-            if (depth == 0) printSemantics(info, module);
+            if (depth == 0) printSemantics(info, module, src, true);   // en modo interfaz, informativos: sólo los del raíz
 
             if (info.module == null) {
                 indent(depth); System.err.println("interface sin ModuleSymbol en " + srcAbs.getFileName());
@@ -1223,7 +1284,7 @@ public final class Main {
             // #211 — avisos no fatales (p.ej. llamada native→BP que pierde
             // la velocidad AOT). Se imprimen como avisos del compilador.
             for (String wmsg : emitter.getWarnings()) {
-                System.out.println("-- aviso AOT: " + wmsg);
+                diag().println("-- aviso AOT: " + wmsg);   // V9 #856: también con --quiet
             }
             // csrc puede estar vacío si no hay nativas — ya filtrado arriba,
             // así que aquí esperamos algo. Si no, raro pero no error.
@@ -1322,8 +1383,8 @@ public final class Main {
         JvmEmitter emitter = new JvmEmitter(module, info);
         emitter.emitTo(ctx.outDir);
         if (!emitter.errors.isEmpty()) {
-            indent(depth); System.out.printf("-- Errores del emisor JVM (%d) --%n", emitter.errors.size());
-            for (String e : emitter.errors) System.out.println("  " + e);
+            indent(depth); diag().printf("-- Errores del emisor JVM (%d) --%n", emitter.errors.size());   // V9 #856
+            for (String e : emitter.errors) diag().println("  " + e);
             ctx.totalErrors += emitter.errors.size();
         }
         indent(depth); System.out.println("compilado: " + ctx.outDir.toAbsolutePath().resolve(module.name + ".class"));
@@ -1502,7 +1563,7 @@ public final class Main {
 
         // 3) Compila la interfaz desde el .bp source.
         if (bpSource == null) {
-            indent(depth); System.out.printf("-- no se localizó .bp ni .bpi para import '%s'; se omitirá --%n", qualifiedName);
+            indent(depth); diag().printf("-- no se localizó .bp ni .bpi para import '%s'; se omitirá --%n", qualifiedName);   // V9 #856
             return;
         }
         avisarSiTapaStdlib(qualifiedName, modName, bpSource, ctx, depth);   /* V7/H2 (#493) */
@@ -1677,7 +1738,7 @@ public final class Main {
             indent(depth); System.out.printf("-- .bpi de contrato obsoleta (%s); regenerando --%n", bpiInOut.getFileName());
         }
         if (bpSource == null) {
-            indent(depth); System.out.printf("-- no se localizó .bp ni .bpi para contrato '%s' --%n", qualifiedName);
+            indent(depth); diag().printf("-- no se localizó .bp ni .bpi para contrato '%s' --%n", qualifiedName);   // V9 #856
             return;
         }
         compileInterface(bpSource, ctx, depth);
@@ -1803,7 +1864,7 @@ public final class Main {
             indent(depth); System.out.printf("-- .bpi de interfaz obsoleta (%s); regenerando --%n", bpiInOut.getFileName());
         }
         if (bpSource == null) {
-            indent(depth); System.out.printf("-- no se localizó .bp ni .bpi para interfaz '%s' --%n", module.implementsName);
+            indent(depth); diag().printf("-- no se localizó .bp ni .bpi para interfaz '%s' --%n", module.implementsName);   // V9 #856
             return;
         }
         compileInterface(bpSource, ctx, depth);
@@ -1830,7 +1891,7 @@ public final class Main {
             Path sib = importerSrc.toAbsolutePath().getParent().resolve(bpiName);
             if (Files.exists(sib)) candidate = sib;
             else {
-                indent(depth); System.out.printf("-- aviso: no se encontró .bpi para interfaz '%s' --%n", qualifiedName);
+                indent(depth); diag().printf("-- aviso: no se encontró .bpi para interfaz '%s' --%n", qualifiedName);   // V9 #856
                 return null;
             }
         }
@@ -1890,7 +1951,7 @@ public final class Main {
         Path real = elegido.toAbsolutePath().normalize();
         if (real.equals(enStdlib) || real.startsWith(ctx.stdlibDir.toAbsolutePath().normalize())) return;
         if (!Files.isRegularFile(enStdlib)) return;
-        indent(depth); System.out.printf("-- aviso: '%s' se toma de %s y NO de la stdlib (%s); si no es a propósito, quita esa copia --%n",
+        indent(depth); diag().printf("-- aviso: '%s' se toma de %s y NO de la stdlib (%s); si no es a propósito, quita esa copia --%n",
                 qualifiedName, real, enStdlib);
     }
 
@@ -2502,7 +2563,7 @@ public final class Main {
                                 alias, bpiName, ctx.stdlibDir, importerDir));
                         continue;
                     }
-                    indent(depth); System.out.printf("-- aviso: sin interfaz para import '%s' (ni '%s' ni su .mod) --%n",
+                    indent(depth); diag().printf("-- aviso: sin interfaz para import '%s' (ni '%s' ni su .mod) --%n",
                             alias, bpiName);
                     continue;
                 }
@@ -2519,7 +2580,7 @@ public final class Main {
                         continue;
                     }
                     // Un .mod sin interfaz legible: avisa, no revientes (antes: NPE).
-                    indent(depth); System.out.printf("-- aviso: '%s' no expone interfaz legible para import '%s' --%n",
+                    indent(depth); diag().printf("-- aviso: '%s' no expone interfaz legible para import '%s' --%n",
                             bpi, alias);
                     continue;
                 }
@@ -3505,7 +3566,7 @@ public final class Main {
         if (bpiPath != null) return;
         Path bpSrc = locateImplBpSource(boundImpl, fromPath, importerDir, ctx);
         if (bpSrc == null) {
-            indent(depth); System.out.printf("-- no se localizó .bp ni .bpi para impl '%s' --%n", boundImpl);
+            indent(depth); diag().printf("-- no se localizó .bp ni .bpi para impl '%s' --%n", boundImpl);   // V9 #856
             return;
         }
         compileInterface(bpSrc, ctx, depth);
@@ -3546,7 +3607,7 @@ public final class Main {
         }
 
         if (bpSrc == null) {
-            indent(depth); System.out.printf("-- no se localizó .bp para impl '%s' --%n", boundImpl);
+            indent(depth); diag().printf("-- no se localizó .bp para impl '%s' --%n", boundImpl);   // V9 #856
             return;
         }
         compileFull(bpSrc, ctx, depth);
@@ -3675,7 +3736,7 @@ public final class Main {
      */
     private static boolean generarDaos(BpBuild proj) {
         DaoGen.Resultado r = DaoGen.generar(proj, true);
-        for (String a : r.avisos)  System.out.println("aviso: " + a);
+        for (String a : r.avisos)  diag().println("aviso: " + a);   // V9 #856: también con --quiet
         for (String e : r.errores) System.err.println("error: " + e);
         for (String f : r.escritos)   System.out.println("  generado : " + f);
         for (String f : r.sinCambios) System.out.println("  al dia   : " + f);
@@ -3789,7 +3850,7 @@ public final class Main {
         }
         if (!r.lexErrors.isEmpty()) {
             System.out.printf("-- Errores léxicos en %s (%d) --%n", src.getFileName(), r.lexErrors.size());
-            for (LexerError e : r.lexErrors) System.out.println(e);
+            for (LexerError e : r.lexErrors) diag().println(conFichero(src, e.line, e.column, e.toString()));   // V9 #856
         }
 
         if (parser != null) {
@@ -3807,24 +3868,31 @@ public final class Main {
         }
         if (!r.parseErrors.isEmpty()) {
             System.out.printf("-- Errores sintácticos en %s (%d) --%n", src.getFileName(), r.parseErrors.size());
-            for (ParserError e : r.parseErrors) System.out.println(e);
+            for (ParserError e : r.parseErrors) diag().println(conFichero(src, e.line, e.column, e.toString()));   // V9 #856
         }
         return r;
     }
 
-    private static void printSemantics(SemanticInfo info, Ast.ModuleNode module) {
+    /**
+     * Los diagnósticos semánticos de un módulo, cada uno con su fichero (V9 #856 a); y, con {@code conResumen} (el
+     * módulo raíz), «sin diagnósticos» y el resumen. V9 #856, el fallo: los de un módulo IMPORTADO no salían (sólo
+     * «compilación abortada por errores semánticos en Lib.bp», sin el error). Ahora salen cuando NO COMPILA (sus
+     * errores, y con ellos sus avisos); si compila, no: sus avisos no se veían, y el de «no define main» lo da toda
+     * librería (sólo le importa al raíz): con él, cada compilación correcta lo repetiría, y --quiet nunca callaría.
+     */
+    private static void printSemantics(SemanticInfo info, Ast.ModuleNode module, Path src, boolean conResumen) {
         if (info == null) return;
         int errs = 0, warns = 0;
         for (SemanticDiagnostic d : info.diagnostics) {
             if (d.kind == SemanticDiagnostic.Kind.ERROR) errs++; else warns++;
         }
         if (info.diagnostics.isEmpty()) {
-            System.out.println("-- Sin diagnósticos semánticos --");
-        } else {
+            if (conResumen) System.out.println("-- Sin diagnósticos semánticos --");
+        } else if (conResumen || errs > 0) {
             System.out.printf("-- Diagnósticos semánticos (%d errores, %d avisos) --%n", errs, warns);
-            for (SemanticDiagnostic d : info.diagnostics) System.out.println(d);
+            for (SemanticDiagnostic d : info.diagnostics) diag().println(conFichero(src, d.line, d.column, d.toString()));
         }
-        if (info.module != null) {
+        if (conResumen && info.module != null) {
             Symbol.ModuleSymbol m = info.module;
             int classes = 0, enums = 0, funcs = 0, vars = 0, consts = 0, props = 0;
             for (Symbol s : m.members.getSymbols()) {
