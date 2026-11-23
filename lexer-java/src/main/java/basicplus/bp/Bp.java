@@ -4,7 +4,9 @@
 package basicplus.bp;
 
 import basicplus.frontend.BpBuild;
+import basicplus.frontend.EscritorApi;
 import basicplus.frontend.Main;
+import basicplus.frontend.ModuleInterface;
 import edu.bpgenvm.config.VmConfig;
 import edu.bpgenvm.vm.debug.Traza;
 
@@ -24,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * La orden {@code bp}: compilar, ejecutar y lo demás de la línea de órdenes, con un solo nombre (Eduardo, 23-nov:
@@ -61,6 +64,7 @@ public final class Bp {
             case "frontend": return frontend(resto);
             case "vm":       return vm(resto);
             case "placa":    return placa(resto);   // V9 #857
+            case "api":      return api(resto);     // V9 #858
             default:
                 System.err.println("bp: orden desconocida: " + orden);
                 ayuda(System.err);
@@ -83,6 +87,10 @@ public final class Bp {
         out.println("        haga falta, como el IDE, y lo ejecuta; su salida y su código, como con las VMs del PC");
         out.println("  bp placa <COM22 | IP | sim> ls [ruta] | get <ruta> [fichero] | stop | info");
         out.println("        lista sus ficheros, baja uno (una captura: get /X.shot), para lo que corre, su INFO");
+        out.println("  bp api [<Módulo | programa.mod>] [--todo]");
+        out.println("        la API de un módulo, en BP: sus declaraciones públicas, sin los cuerpos (lo encuentra como");
+        out.println("        `import`: la stdlib, las librerías del BpVM.cfg, los packs); con --todo, también lo que ve");
+        out.println("        quien hereda y lo del sistema (__nombre). Sin módulo, los que se pueden importar");
         out.println("  bp png <captura.shot> [salida.png]");
         out.println("        una captura de Gui.shot, a PNG");
         out.println("  bp frontend <lo del compilador>");
@@ -107,6 +115,10 @@ public final class Bp {
     static VmConfig cfgDeLaInstalacion() {
         VmConfig cfg = Instalacion.cfg(instalacion());
         Main.setCfgDelHospedador(cfg);
+        /* V9 #858 — y su biblioteca de packs, como la del IDE: el compilador sólo los buscaba en el BpVM.cfg de la
+         * carpeta de trabajo, y desde otra, un `import SQLite` se quedaba sin su interfaz. */
+        Path packs = Instalacion.packsDir(instalacion());
+        Main.setPacksDir(packs == null ? null : packs.toString());
         return cfg;
     }
 
@@ -188,6 +200,69 @@ public final class Bp {
         }
         System.err.println("bp: no sé compilar " + fichero + " (un .bp, un .jc o un .bpbuild)");
         return new Compilado(1, null);
+    }
+
+    // ---- api (V9 H1.7, #858) ----
+
+    /** {@code bp api [Módulo | X.mod] [--todo]}: la API de un módulo escrita en BP, el módulo sin los cuerpos
+     *  ({@link EscritorApi}), encontrado como lo encontraría un {@code import} en un fuente de la carpeta de trabajo; a
+     *  secas, los módulos que se pueden importar desde ella. Eduardo, 23-nov: «Si». */
+    static int api(List<String> args) {
+        boolean todo = false;
+        List<String> sueltos = new ArrayList<>();
+        for (String a : args) {
+            if ("--todo".equals(a)) todo = true;
+            else if (a.startsWith("-")) { System.err.println("bp api: opción desconocida: " + a); return 1; }
+            else sueltos.add(a);
+        }
+        if (sueltos.size() > 1) {
+            System.err.println("bp api: un módulo cada vez (o ninguno: los que se pueden importar)");
+            return 1;
+        }
+        cfgDeLaInstalacion();
+        Path aqui = Paths.get("").toAbsolutePath().normalize();
+        if (sueltos.isEmpty()) {
+            Map<String, List<String>> porSitio = Main.modulosQueSePuedenImportar(aqui);
+            if (porSitio.isEmpty()) {
+                System.err.println("bp api: no encuentro ninguna librería: ni la stdlib (mira el BpVM.cfg)");
+                return 1;
+            }
+            for (Map.Entry<String, List<String>> e : porSitio.entrySet()) {
+                System.out.println(e.getKey() + ":");
+                StringBuilder linea = new StringBuilder(" ");
+                for (String n : e.getValue()) {
+                    if (linea.length() + 1 + n.length() > 100) { System.out.println(linea); linea = new StringBuilder(" "); }
+                    linea.append(' ').append(n);
+                }
+                System.out.println(linea);
+            }
+            System.out.println();
+            System.out.println("La API de uno: bp api <Módulo>");
+            return 0;
+        }
+        String q = sueltos.get(0);
+        try {
+            if (q.toLowerCase(Locale.ROOT).endsWith(".mod")) {
+                Path mod = Paths.get(q);
+                if (!Files.isRegularFile(mod)) { System.err.println("bp api: no existe " + q); return 1; }
+                ModuleInterface mi = Main.interfazDeUnMod(mod);
+                if (mi == null) { System.err.println("bp api: " + q + " no es un .mod que lleve su interfaz"); return 1; }
+                System.out.print(EscritorApi.escribe(mi, rutaParaMostrar(mod), todo));
+                return 0;
+            }
+            Main.InterfazHallada h = Main.interfazDeUnImport(q, aqui);
+            if (h == null) {
+                System.err.println("bp api: no encuentro el módulo '" + q + "' (ni en la stdlib, ni en las librerías"
+                        + " del BpVM.cfg, ni en un pack). Los que hay: bp api. Uno tuyo, compílalo antes (bp build):"
+                        + " se busca en out/, como al importarlo");
+                return 1;
+            }
+            System.out.print(EscritorApi.escribe(h.iface, h.origen, todo));
+            return 0;
+        } catch (IOException e) {
+            System.err.println("bp api: " + e.getMessage());
+            return 1;
+        }
     }
 
     // ---- run ----

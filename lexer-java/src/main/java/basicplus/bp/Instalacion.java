@@ -55,6 +55,19 @@ public final class Instalacion {
         return c;
     }
 
+    /** V9 #858 — la biblioteca de packs de la instalación en {@code dir}: {@code packs/} junto al jar (el ZIP la trae en
+     *  su raíz) o, si no está, {@code packs/} en la carpeta de trabajo (en el repositorio, desde su raíz); null si no hay
+     *  ninguna. La regla del IDE (sin su preferencia: {@code IdePrefs.packsDirEffective}), aquí para los dos: la orden
+     *  {@code bp} no la tenía, y el compilador, desde una carpeta sin BpVM.cfg, no encontraba {@code SQLite}. */
+    public static Path packsDir(Path dir) {
+        if (dir != null) {
+            Path junto = dir.resolve("packs");
+            if (Files.isDirectory(junto)) return junto;
+        }
+        Path cwd = Paths.get(System.getProperty("user.dir", "."), "packs");
+        return Files.isDirectory(cwd) ? cwd : null;
+    }
+
     /** V9 #867 — el BpVM.cfg que manda para {@code ancla} (un fuente, un .mod, una carpeta; null = sólo el cwd): el de
      *  siempre ({@code loadDefaultFor}: el cwd, o subiendo desde el ancla), y si no aparece ninguno, el de la
      *  instalación ({@code deLaInstalacion}). El compilador hace lo mismo (Main.setCfgDelHospedador): la stdlib con la

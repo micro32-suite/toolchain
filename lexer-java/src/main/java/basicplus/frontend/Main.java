@@ -2118,6 +2118,29 @@ public final class Main {
     private static void cargarInterfazDelPack(Path packFile, String etiquetaPack,
                                               String moduleName, String ifaceCacheKey,
                                               Ctx ctx, int depth) throws IOException {
+        ModLeido ml = modDelPack(packFile, etiquetaPack, moduleName);
+        byte[] ifaceBytes = ml.iface;
+        ModuleInterface iface = ModuleInterface.fromBytes(ifaceBytes,
+                packFile.getFileName() + "!" + moduleName);
+        ctx.interfaceCache.put(ifaceCacheKey, iface);
+        ctx.versionesDeps.put(ifaceCacheKey, new int[]{ml.gen, crc32De(ifaceBytes)});   // V7/H2
+        /* V5/H8 — el pack del que salió queda apuntado, venga de `from pack` o de
+         * la búsqueda. Antes sólo se anotaba la vía del `.mod` suelto, así que un
+         * proyecto que importara de un pack construía su manifest SIN el
+         * `requires-pack=` correspondiente: el pack decía no necesitar nada y sí
+         * lo necesitaba. Se apunta el nombre REAL del fichero, no el que escribió
+         * el usuario, que puede diferir en mayúsculas o traer la extensión. */
+        String nombrePack = packFile.getFileName().toString();
+        if (nombrePack.endsWith(".pack")) nombrePack = nombrePack.substring(0, nombrePack.length() - 5);
+        ctx.packsRequeridos.add(nombrePack);
+        indent(depth); System.out.printf("-- interfaz de '%s' desde el pack %s --%n",
+                moduleName, packFile.getFileName());
+    }
+
+    /** El `.mod` de `moduleName` dentro de un pack YA LOCALIZADO, leído (su cabecera y su interfaz), o la
+     *  IOException que dice qué falta. V9 H1.7 (#858): separado de {@link #cargarInterfazDelPack} para `bp api`, que
+     *  quiere la interfaz sin cargarla en una compilación; abrir, encontrar la entrada y extraer, una vez. */
+    private static ModLeido modDelPack(Path packFile, String etiquetaPack, String moduleName) throws IOException {
         basicplus.pack.PackReader.Pack pk;
         try {
             pk = basicplus.pack.PackReader.read(Files.readAllBytes(packFile));
@@ -2144,26 +2167,138 @@ public final class Main {
                     + hay + "]");
         }
         ModLeido ml = leerMod(new java.io.ByteArrayInputStream(modBytes));
-        byte[] ifaceBytes = (ml == null) ? null : ml.iface;
-        if (ifaceBytes == null) {
+        if (ml == null || ml.iface == null) {
             throw new IOException("el módulo '" + want + "' dentro del pack '" + etiquetaPack
                     + "' no lleva interfaz embebida (¿.mod de una versión anterior?); recompílalo");
         }
-        ModuleInterface iface = ModuleInterface.fromBytes(ifaceBytes,
-                packFile.getFileName() + "!" + want);
-        ctx.interfaceCache.put(ifaceCacheKey, iface);
-        ctx.versionesDeps.put(ifaceCacheKey, new int[]{ml.gen, crc32De(ifaceBytes)});   // V7/H2
-        /* V5/H8 — el pack del que salió queda apuntado, venga de `from pack` o de
-         * la búsqueda. Antes sólo se anotaba la vía del `.mod` suelto, así que un
-         * proyecto que importara de un pack construía su manifest SIN el
-         * `requires-pack=` correspondiente: el pack decía no necesitar nada y sí
-         * lo necesitaba. Se apunta el nombre REAL del fichero, no el que escribió
-         * el usuario, que puede diferir en mayúsculas o traer la extensión. */
-        String nombrePack = packFile.getFileName().toString();
-        if (nombrePack.endsWith(".pack")) nombrePack = nombrePack.substring(0, nombrePack.length() - 5);
-        ctx.packsRequeridos.add(nombrePack);
-        indent(depth); System.out.printf("-- interfaz de '%s' desde el pack %s --%n",
-                moduleName, packFile.getFileName());
+        return ml;
+    }
+
+    // ============================================================
+    // V9 H1.7 (#858) — `bp api`: la interfaz de un módulo, para leerla
+    // ============================================================
+
+    /** V9 H1.7 (#858) — lo que encontraría un `import`, y de dónde: la ruta del `.mod`, o el pack y su ruta. */
+    public static final class InterfazHallada {
+        public final ModuleInterface iface;
+        public final String origen;
+        InterfazHallada(ModuleInterface iface, String origen) { this.iface = iface; this.origen = origen; }
+    }
+
+    /** V9 H1.7 (#858) — el contexto de un fuente de {@code carpeta}, como lo tendría compilándolo: su BpVM.cfg (el de la
+     *  carpeta de trabajo o, subiendo, el de la carpeta; sin ninguno, el del hospedador) y su outDir, el `out` de
+     *  `bp build`. */
+    private static Ctx ctxDeLaCarpeta(Path carpeta) {
+        Ctx ctx = new Ctx();
+        Path dir = carpeta.toAbsolutePath().normalize();
+        ctx.rootSrcDir = dir;
+        ctx.outDir = dir.resolve("out");
+        ctx.autodiscoverFromSource(dir.resolve("_.bp"));   // un fuente de la carpeta (no hace falta que exista)
+        return ctx;
+    }
+
+    /** V9 H1.7 (#858) — `bp api <Módulo>`: la interfaz que cargaría `import <nombre>` escrito en un fuente de
+     *  {@code carpeta}, por el camino del compilador: un `.mod` (la stdlib primero, el outDir, la carpeta, las
+     *  dependencias del BpVM.cfg: {@link #locateImportMod}) o, si no hay ninguno, el pack instalado que lo trae
+     *  ({@link #packsQueTraen}; si lo traen dos, el error que lo dice, el mismo del compilador). null si no lo encuentra:
+     *  un módulo que sólo tiene su fuente, también (aquí no se compila nada). */
+    public static InterfazHallada interfazDeUnImport(String nombre, Path carpeta) throws IOException {
+        Ctx ctx = ctxDeLaCarpeta(carpeta);
+        Ast.ImportNode imp = new Ast.ImportNode(java.util.Arrays.asList(nombre.split("\\.")), null, 0, 0);
+        Path mod = locateImportMod(imp, nombre + ".mod", ctx.rootSrcDir, ctx);
+        if (mod != null) {
+            ModuleInterface mi = readInterfaceCached(mod, ctx);
+            if (mi != null) return new InterfazHallada(mi, mod.toString());
+        }
+        if (nombre.indexOf('.') >= 0) return null;   // `Lib.Modulo`: los packs, como en el compilador, sólo sin librería
+        java.util.List<Path> traen = packsQueTraen(nombre, ctx);
+        if (traen.size() > 1) throw variosPacks(nombre, traen);
+        if (traen.isEmpty()) return null;
+        Path pack = traen.get(0);
+        ModLeido ml = modDelPack(pack, pack.getFileName().toString(), nombre);
+        return new InterfazHallada(ModuleInterface.fromBytes(ml.iface, pack.getFileName() + "!" + nombre),
+                "el pack " + nombreDelPack(pack) + " (" + pack + ")");
+    }
+
+    /** V9 H1.7 (#858) — `bp api <X.mod>`: la interfaz de ese `.mod`; null si no es un `.mod` que la lleve. */
+    public static ModuleInterface interfazDeUnMod(Path mod) throws IOException {
+        ModLeido ml;
+        try (java.io.InputStream raw = new java.io.BufferedInputStream(Files.newInputStream(mod))) {
+            ml = leerMod(raw);
+        }
+        return (ml == null || ml.iface == null) ? null : ModuleInterface.fromBytes(ml.iface, mod.toString());
+    }
+
+    /** V9 H1.7 (#858) — `bp api` a secas: los módulos que se pueden importar desde un fuente de {@code carpeta}, cada
+     *  uno una vez, donde lo encontraría `import`: la stdlib, las dependencias del BpVM.cfg (los dispositivos) y los packs
+     *  instalados, en ese orden. Sin los que no publican nada (`Stdlib`, que sólo importa la librería). Por sitio (su
+     *  carpeta, o «el pack X (ruta)»), sus nombres en orden. */
+    public static java.util.Map<String, java.util.List<String>> modulosQueSePuedenImportar(Path carpeta) {
+        Ctx ctx = ctxDeLaCarpeta(carpeta);
+        java.util.Map<String, java.util.List<String>> porSitio = new java.util.LinkedHashMap<>();
+        java.util.Set<String> vistos = new java.util.HashSet<>();
+        java.util.List<Path> carpetas = new java.util.ArrayList<>();
+        if (ctx.stdlibDir != null) carpetas.add(ctx.stdlibDir.toAbsolutePath().normalize());
+        for (Path d : ctx.dependencyPaths) {
+            Path n = d.toAbsolutePath().normalize();
+            if (Files.isDirectory(n) && !carpetas.contains(n)) carpetas.add(n);
+        }
+        for (Path d : carpetas) {
+            java.util.List<Path> mods = new java.util.ArrayList<>();
+            try (java.util.stream.Stream<Path> s = Files.list(d)) {
+                s.filter(p -> p.getFileName().toString().endsWith(".mod")).forEach(mods::add);
+            } catch (IOException ignored) { continue; }
+            java.util.Collections.sort(mods);
+            for (Path m : mods) {
+                String nombre = m.getFileName().toString();
+                nombre = nombre.substring(0, nombre.length() - 4);
+                try {
+                    ModuleInterface mi = interfazDeUnMod(m);
+                    if (mi != null && publicaAlgo(mi) && vistos.add(nombre))
+                        porSitio.computeIfAbsent(d.toString(), k -> new java.util.ArrayList<>()).add(nombre);
+                } catch (IOException ignored) { /* uno ilegible no tapa a los demás */ }
+            }
+        }
+        java.util.Set<String> packsVistos = new java.util.HashSet<>();   // como packsQueTraen: por nombre de fichero
+        for (Path d : dirsDePacks(ctx)) {
+            if (d == null || !Files.isDirectory(d)) continue;
+            java.util.List<Path> packs = new java.util.ArrayList<>();
+            try (java.util.stream.Stream<Path> s = Files.list(d)) {
+                s.filter(p -> p.getFileName().toString().endsWith(".pack")).forEach(packs::add);
+            } catch (IOException ignored) { continue; }
+            java.util.Collections.sort(packs);
+            for (Path p : packs) {
+                Path abs = p.toAbsolutePath().normalize();
+                if (!packsVistos.add(abs.getFileName().toString().toLowerCase())) continue;
+                try {
+                    basicplus.pack.PackReader.Pack pk = basicplus.pack.PackReader.read(Files.readAllBytes(abs));
+                    java.util.List<String> nombres = new java.util.ArrayList<>();
+                    for (basicplus.pack.PackEntry e : pk.entries) {
+                        if (!"mod".equals(e.tipo)) continue;
+                        String nombre = e.nombre.endsWith(".mod") ? e.nombre.substring(0, e.nombre.length() - 4) : e.nombre;
+                        ModLeido ml = leerMod(new java.io.ByteArrayInputStream(e.data));
+                        if (ml == null || ml.iface == null) continue;
+                        if (publicaAlgo(ModuleInterface.fromBytes(ml.iface, abs + "!" + nombre)) && vistos.add(nombre))
+                            nombres.add(nombre);
+                    }
+                    java.util.Collections.sort(nombres);
+                    if (!nombres.isEmpty()) porSitio.put("el pack " + nombreDelPack(abs) + " (" + abs + ")", nombres);
+                } catch (Exception ignored) { /* un pack ilegible: como en packsQueTraen, no es cosa de esta lista */ }
+            }
+        }
+        return porSitio;
+    }
+
+    /** V9 H1.7 (#858) — ¿publica algo que se pueda nombrar desde fuera? */
+    private static boolean publicaAlgo(ModuleInterface mi) {
+        return !mi.functions.isEmpty() || !mi.consts.isEmpty() || !mi.enums.isEmpty()
+                || !mi.properties.isEmpty() || !mi.classes.isEmpty();
+    }
+
+    /** `SQLite.pack` → `SQLite`. */
+    private static String nombreDelPack(Path pack) {
+        String n = pack.getFileName().toString();
+        return n.endsWith(".pack") ? n.substring(0, n.length() - 5) : n;
     }
 
     /** H10 — biblioteca de packs fijada por el HOSPEDADOR del compilador (el IDE la

@@ -10,12 +10,15 @@ The compiler's and the VMs' messages are in Spanish.
 
 1. The cheatsheet, the language on one page: https://micro32-suite.github.io/BasicPlus/cheatsheet.html (it is on the
    web only). Read it all first. Without the web, the manual below.
-2. `@INSTALACION@bpstdlib/*.bp`: the sources of the standard library, the real API. Search there before inventing a
-   method (`grep "public function" @INSTALACION@bpstdlib/Collections.bp`).
-3. `@INSTALACION@samples/*.bp`: about 380 programs that compile. Look for a real use before guessing.
-4. `@INSTALACION@docs/en/manual.html`, `reference`: `docs/en/referencia.html`, the GUI: `docs/en/gui.html`. JC (below):
+2. `bp api <Module>`: the API of a module, its public declarations written in BasicPlus without the bodies
+   (`bp api Collections`); `bp api` alone lists the modules you can import. It finds the module as `import` would,
+   packs included (`SQLite` and `Orm` come without source). Look there before inventing a method.
+3. `@INSTALACION@bpstdlib/*.bp`: the sources of the standard library, with their comments (in Spanish): what a
+   function does, and how.
+4. `@INSTALACION@samples/*.bp`: about 380 programs that compile. Look for a real use before guessing.
+5. `@INSTALACION@docs/en/manual.html`, `reference`: `docs/en/referencia.html`, the GUI: `docs/en/gui.html`. JC (below):
    `docs/en/jc.html`. Spanish versions in `docs/`.
-5. `@INSTALACION@docs/PENDIENTES.md`: what the language does not do yet (in Spanish).
+6. `@INSTALACION@docs/PENDIENTES.md`: what the language does not do yet (in Spanish).
 
 ## Compile and run on the PC (no board, no IDE)
 
@@ -25,6 +28,7 @@ The compiler's and the VMs' messages are in Spanish.
 bp build X.bp        # compiles: out/X.mod next to the source. A project: bp build App.bpbuild
 bp run X.bp          # compiles if needed and runs it on the Java VM
 bp run --c X.bp      # the same on the C VM (the one in the boards)
+bp api Collections   # the API of a module (bp api alone: the modules you can import)
 bp help              # the rest: bp png (a screen capture to PNG), bp frontend and bp vm (all the options)
 ```
 

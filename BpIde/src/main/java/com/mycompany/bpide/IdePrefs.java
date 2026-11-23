@@ -164,10 +164,8 @@ public final class IdePrefs {
      *  entonces dónde configurarla. */
     public String packsDirEffective() {
         if (packsDir != null && !packsDir.isEmpty()) return packsDir;
-        Path junto = installSubdir("packs");
-        if (junto != null) return junto.toString();
-        Path cwd = Paths.get(System.getProperty("user.dir", "."), "packs");
-        return Files.isDirectory(cwd) ? cwd.toString() : null;
+        Path p = basicplus.bp.Instalacion.packsDir(installDir());   // V9 #858: la misma regla que la orden bp
+        return p == null ? null : p.toString();
     }
 
     /** Carpeta de datos efectiva del simulador (nunca null). */
