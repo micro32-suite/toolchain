@@ -8,16 +8,16 @@ The compiler's and the VMs' messages are in Spanish.
 
 ## Where to look, in this order
 
-1. The cheatsheet, the language on one page: https://micro32-suite.github.io/BasicPlus/cheatsheet.html (it is on the
-   web only). Read it all first. Without the web, the manual below.
+1. The cheatsheet, the language on one page: `@INSTALACION@docs/cheatsheet.html.md`. Read it all first.
 2. `bp api <Module>`: the API of a module, its public declarations written in BasicPlus without the bodies
    (`bp api Collections`); `bp api` alone lists the modules you can import. It finds the module as `import` would,
    packs included (`SQLite` and `Orm` come without source). Look there before inventing a method.
 3. `@INSTALACION@bpstdlib/*.bp`: the sources of the standard library, with their comments (in Spanish): what a
    function does, and how.
 4. `@INSTALACION@samples/*.bp`: about 380 programs that compile. Look for a real use before guessing.
-5. `@INSTALACION@docs/en/manual.html`, `reference`: `docs/en/referencia.html`, the GUI: `docs/en/gui.html`. JC (below):
-   `docs/en/jc.html`. Spanish versions in `docs/`.
+5. The manual, `@INSTALACION@docs/en/manual.html.md`; the reference, `docs/en/referencia.html.md`; the GUI,
+   `docs/en/gui.html.md`; JC (below), `docs/en/jc.html.md`. In Markdown, made from each `.html` beside it: there the
+   code is plain text, and `grep` finds it. Spanish versions, HTML only, in `docs/`.
 6. `@INSTALACION@docs/PENDIENTES.md`: what the language does not do yet (in Spanish).
 
 ## Compile and run on the PC (no board, no IDE)
@@ -105,7 +105,7 @@ What does work as you would expect: `class B extends A`, `super(x)` in the const
 ## JC — the same language with braces (`.jc` files)
 
 JC **looks** like Java or C#, but it is BasicPlus with another syntax: do not write Java from memory. Read
-`@INSTALACION@docs/en/jc.html` §3 (one program in BP and in JC) and §17 (what JC lacks and what changes). The library is
+`@INSTALACION@docs/en/jc.html.md` §3 (one program in BP and in JC) and §17 (what JC lacks and what changes). The library is
 the same, with the same names and the same traps as above.
 
 | You would write in Java | In JC |
