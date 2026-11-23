@@ -1360,12 +1360,22 @@ public class FrmMain extends javax.swing.JFrame
                     JOptionPane.ERROR_MESSAGE));
         }
 
+        // V9 H1.3 (#854) — la guía para IA (AGENTS.md y el CLAUDE.md que la incluye), donde una IA la encuentra sola.
+        List<Path> guia = new ArrayList<>();
+        try {
+            guia = GuiaIa.dejaEn(dir.toPath());
+        } catch (java.io.IOException ex) {
+            appendConsola("[ide] la guía para IA no se pudo dejar en el proyecto: " + ex.getMessage() + "\n");
+        }
+
         Resultado cargado = cargaProyecto(buildFile.toPath());
         if (!cargado.ok) return listo(cargado);
         Resultado abierto = abreEnElEditor(mainBp.toPath());
         if (!abierto.ok) return listo(abierto);
+        List<String> escritos = new ArrayList<>();
+        for (Path g : guia) escritos.add(g.toString());
         return listo(Resultado.bien("proyecto nuevo: " + buildFile).con("proyecto", buildFile.toString())
-                .con("main", mainBp.toString()));
+                .con("main", mainBp.toString()).con("guia", escritos));
     }
 
     /** Desde la ventana, «abrir_proyecto» pide el .bpbuild con el selector, como siempre; null si se cancela. */
@@ -2632,6 +2642,13 @@ public class FrmMain extends javax.swing.JFrame
         miServidorIa.setSelected(true);
         appendConsola("[ia] servidor para la IA en " + servidorIa.url() + " — su carpeta: " + carpeta + "\n"
                 + "[ia] para conectar Claude Code (una vez, en una terminal): " + ordenParaConectar() + "\n");
+        // V9 H1.3 (#854) — la guía para IA, en su carpeta (lo que falte; no pisa nada): las instrucciones del servidor
+        // la nombran, y Claude Code, abierto ahí, la lee solo.
+        try {
+            for (Path g : GuiaIa.dejaEn(carpeta)) appendConsola("[ia] la guía para la IA: " + g + "\n");
+        } catch (IOException ex) {
+            appendConsola("[ia] la guía para la IA no se pudo dejar en " + carpeta + ": " + ex.getMessage() + "\n");
+        }
         return Resultado.bien("en marcha en " + servidorIa.url());
     }
 

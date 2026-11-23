@@ -86,6 +86,13 @@
                                       overwrite="true"
                                       failonerror="true"/>
                                 <echo message="manual.html sincronizado desde docs/ → resources/"/>
+                                <!-- V9 H1.3 (#854): la guía para IA, la plantilla de la raíz del ZIP; el IDE la
+                                     deja en cada proyecto nuevo y en la carpeta de la IA (GuiaIa). -->
+                                <copy file="${project.basedir}/../../scripts/zip/AGENTS.md"
+                                      tofile="${project.basedir}/src/main/resources/AGENTS.md"
+                                      overwrite="true"
+                                      failonerror="true"/>
+                                <echo message="AGENTS.md sincronizado desde scripts/zip/ → resources/"/>
                             </target>
                         </configuration>
                     </execution>

@@ -240,7 +240,17 @@ public final class ServidorIa {
                 + carpeta + " (una relativa se toma desde ahí). Un programa a la vez; uno que no acaba (una GUI), se"
                 + " para con «parar». Con la placa, una herramienta cada vez, no varias a la vez: atiende un listado,"
                 + " una subida o una bajada cada vez, y a lo que llega a destiempo contesta «ocupada». La documentación"
-                + " del lenguaje está en la carpeta docs de la instalación (el manual, la referencia y la guía del IDE).";
+                + " del lenguaje está en la carpeta docs de la instalación (el manual, la referencia y la guía del IDE)."
+                + guia();
+    }
+
+    /** V9 H1.3 (#854) — la guía para IA, si está en la carpeta (el IDE la deja al encender el servidor). */
+    private String guia() {
+        Path g = carpeta != null ? carpeta.resolve(GuiaIa.GUIA) : null;
+        if (g == null || !java.nio.file.Files.isRegularFile(g)) return "";
+        return " ANTES DE ESCRIBIR BasicPlus, lee la guía para IA, " + g + " (en inglés): no es Java ni Visual Basic,"
+                + " y dice dónde está la API, cómo se compila y se ejecuta (también sin el IDE: bp) y las trampas de"
+                + " quien viene de Java o de C#.";
     }
 
     private Map<String, Object> herramientas() {
