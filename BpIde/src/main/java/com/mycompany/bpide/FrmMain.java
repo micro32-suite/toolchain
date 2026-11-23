@@ -2715,7 +2715,8 @@ public class FrmMain extends javax.swing.JFrame
 
     /** La salida estándar del proceso, la de verdad, en UTF-8 (las rutas pueden llevar acentos): ahí lee quien abrió
      *  el IDE con --ia cómo acabó su petición. Se guarda al cargar la clase porque compilar redirige System.out a la
-     *  consola mientras dura (invokeWithCapture). */
+     *  consola mientras dura (invokeWithCapture). El texto de esas líneas, sin nada fuera del ASCII: una consola de
+     *  Windows que no esté en UTF-8 lo desfiguraría. */
     private static final PrintStream SALIDA = salidaUtf8();
 
     private static PrintStream salidaUtf8() {
@@ -2776,7 +2777,7 @@ public class FrmMain extends javax.swing.JFrame
         if (si && carpeta == null) {
             carpeta = eligeCarpetaDeLaIa();
             if (carpeta == null) {
-                cuentaALaIa("sin carpeta (no se eligió ninguna): el servidor para la IA sigue apagado");
+                cuentaALaIa("sin carpeta: el servidor para la IA sigue apagado");
                 return;
             }
         }
@@ -2812,7 +2813,7 @@ public class FrmMain extends javax.swing.JFrame
     String trasLaRespuesta(Path carpeta, boolean si) {
         if (si) {
             Resultado r = enciendeLaIa(carpeta);
-            if (r.ok) return "servidor para la IA en " + servidorIa.url() + " — su carpeta: " + servidorIa.carpeta();
+            if (r.ok) return "servidor para la IA en " + servidorIa.url() + ", su carpeta: " + servidorIa.carpeta();
             comandos.muestra(r);
             String linea = r.mensaje.replace("\n", " ");
             appendConsola("[ia] " + linea + "\n");
