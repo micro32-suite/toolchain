@@ -36,6 +36,8 @@ public final class SimRunner {
 
     public SimRunner(Consumer<String> log) { this.log = log; }
 
+    /** Una línea, sin «\n»: quien la recibe pone el suyo (la consola del IDE; `bp`, la salida de errores). Con él,
+     *  tras cada línea del simulado salía otra en blanco en la consola (V9 #874). */
     private void say(String s) { if (log != null) log.accept(s); }
 
     public boolean isRunning() { return proc != null && proc.isAlive(); }
@@ -108,20 +110,22 @@ public final class SimRunner {
         return out;
     }
 
-    /** Los ficheros de la placa simulada, en su carpeta de datos: la flash (el ENV), el FS y la zona de packs. */
-    static final String[] ESTADO = { "micro.flash", "micro.fs", "micro.packs" };
+    /** Lo que se vacía de la placa simulada, en su carpeta de datos: su FS y su zona de packs. Su flash
+     *  ({@code micro.flash}, el ENV: las particiones y lo que se le haya puesto) se queda. */
+    static final String[] VACIABLE = { "micro.fs", "micro.packs" };
 
     /** V9 #871 — VACÍA el micro simulado (Eduardo, 23-nov: «un parámetro para vaciar la VM y que arranque como si
-     *  fuese la primera vez»): borra su flash, su FS y su zona de packs, y nada más de su carpeta. El arranque
-     *  siguiente es el de una placa nueva: con la zona de packs virgen, se graba la librería de esta instalación (#809),
-     *  y en el FS no queda nada de antes (en la prueba de la IA del 23-nov, un /app con Core, Gui… de una versión
-     *  anterior tapaba los de la placa). Con el simulador en marcha no se puede (sus ficheros están abiertos): lanza.
-     *  Devuelve los que ha borrado. */
+     *  fuese la primera vez»): borra su FS y su zona de packs, y nada más de su carpeta. Su configuración se queda: al
+     *  probarlo, con la flash borrada arrancaba sin configurar (estado 0, sin particiones) y el IDE pedía la gestión de
+     *  placa (Eduardo: «quizás destruir la partición no entraba»). El arranque siguiente: con la zona de packs virgen,
+     *  se graba la librería de esta instalación (#809), y en el FS no queda nada de antes (en la prueba de la IA del
+     *  23-nov, un /app con Core, Gui… de una versión anterior tapaba los de la placa). Con el simulador en marcha no se
+     *  puede (sus ficheros están abiertos): lanza. Devuelve los que ha borrado. */
     synchronized List<Path> vacia(IdePrefs prefs) throws IOException {
         if (isRunning()) throw new IOException("el micro simulado está en marcha: páralo antes de vaciarlo");
         Path dataDir = Paths.get(prefs.simDataDirEffective());
         List<Path> borrados = new ArrayList<>();
-        for (String f : ESTADO) {
+        for (String f : VACIABLE) {
             Path p = dataDir.resolve(f);
             /* Windows suelta los ficheros de un proceso que acaba de morir con un poco de retraso: unos reintentos,
              * hasta ~3 s; si sigue sin poder, el motivo de Windows. */
@@ -184,13 +188,13 @@ public final class SimRunner {
             if (nPacks == 0)
                 say("[sim] aviso: sin librería de packs — los programas que usen la "
                   + "stdlib fallarán con 'falta el modulo Core'. Configúrala en el "
-                  + "engranaje del micro simulado.\n");
+                  + "engranaje del micro simulado.");
         } else {
             say("[sim] la zona de packs, la de la última vez (" + zonaPacks.getFileName() + "): para cambiar un pack,"
-              + " el panel de Packs; borrar la carpeta del simulado es una placa nueva\n");
+              + " el panel de Packs; para volver a la librería de esta instalación, «Vaciarlo», en el engranaje");
         }
 
-        say("[sim] " + String.join(" ", cmd) + "\n");
+        say("[sim] " + String.join(" ", cmd));
         ProcessBuilder pb = new ProcessBuilder(cmd);
         pb.directory(dataDir.toFile());
         pb.redirectErrorStream(true);
@@ -203,7 +207,7 @@ public final class SimRunner {
             try (BufferedReader r = new BufferedReader(
                     new InputStreamReader(p.getInputStream(), StandardCharsets.UTF_8))) {
                 String line;
-                while ((line = r.readLine()) != null) say("[sim] " + line + "\n");
+                while ((line = r.readLine()) != null) say("[sim] " + line);
             } catch (IOException ignored) {
                 /* el proceso murió mientras leíamos: no es noticia */
             }
@@ -223,7 +227,7 @@ public final class SimRunner {
             }
             try (Socket s = new Socket()) {
                 s.connect(new InetSocketAddress("127.0.0.1", prefs.simPort), 250);
-                say("[sim] escuchando en 127.0.0.1:" + prefs.simPort + "\n");
+                say("[sim] escuchando en 127.0.0.1:" + prefs.simPort);
                 return "127.0.0.1:" + prefs.simPort;
             } catch (IOException notYet) {
                 try { Thread.sleep(100); } catch (InterruptedException ie) {
@@ -251,6 +255,6 @@ public final class SimRunner {
                 p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
             }
         } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-        say("[sim] parado\n");
+        say("[sim] parado");
     }
 }

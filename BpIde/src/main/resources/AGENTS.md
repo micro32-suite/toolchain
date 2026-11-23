@@ -78,7 +78,8 @@ code. Files on the PC: only inside the folder the user allowed.
   `@INSTALACION@docs/INSTALAR_FIRMWARE.md`).
 - **The simulated micro keeps its state** between runs, like a board (its file system and its packs). If it carries
   things from before (old files in `/app`, a library that does not export what the program uses),
-  `micro_simulado` with `de_cero: true` empties it and starts it as the first time, with this installation's library.
+  `micro_simulado` with `de_cero: true` empties it (all its files and its packs zone; its configuration, the
+  partitions, stays) and starts it with this installation's library.
 
 ## Traps for those coming from Java or C#
 

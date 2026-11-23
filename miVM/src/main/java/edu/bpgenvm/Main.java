@@ -441,8 +441,12 @@ public class Main {
                 if (!vm.getTrazaError().isEmpty()) {
                     System.err.println(Traza.PREFIJO + vm.getTrazaError() + " ===");
                     // V9 #855 (c) — y con sus nombres (el fichero, la línea y la función): la VM Java tiene los .dbg.
-                    for (String l : Traza.lineas(vm.getTrazaError(), carpetasDeLosDbg(runMod, project, cfg))) {
-                        System.err.println(l);
+                    // Sin nadie conectado (bp run, o a mano): con un cliente (el IDE), la traduce él con la del EXITED,
+                    // y aquí salía dos veces en su consola (Eduardo, 23-nov, al probarla).
+                    if (dbgServer == null || !dbgServer.hasClient()) {
+                        for (String l : Traza.lineas(vm.getTrazaError(), carpetasDeLosDbg(runMod, project, cfg))) {
+                            System.err.println(l);
+                        }
                     }
                 }
             }

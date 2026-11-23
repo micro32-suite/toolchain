@@ -348,10 +348,10 @@ public final class PicoExplorer extends JPanel {
                         + " para. Al arrancarlo, devuelve lo de la conexión.")
                 .parametro("arrancar", "sino", "true lo arranca (y se conecta) y false lo para; sin él, alterna (como"
                         + " el botón)")
-                .parametro("de_cero", "sino", "true lo VACÍA antes de arrancarlo (su FS, su flash y su zona de packs)"
-                        + " y arranca como la primera vez, con la librería de esta instalación; si estaba en marcha, lo"
-                        + " para antes. Para cuando lo que tiene es de antes: una librería que no exporta lo que usa el"
-                        + " programa, o ficheros viejos en /app");
+                .parametro("de_cero", "sino", "true lo VACÍA antes de arrancarlo (todos sus archivos y su zona de"
+                        + " packs; su configuración, las particiones, se queda) y arranca con la librería de esta"
+                        + " instalación; si estaba en marcha, lo para antes. Para cuando lo que tiene es de antes: una"
+                        + " librería que no exporta lo que usa el programa, o ficheros viejos en /app");
         comandos.registra("simulado_config", "Configurar el micro simulado", p -> {
             onSimConfig();
             return listo(Resultado.bien("hecho"));
@@ -1463,7 +1463,8 @@ public final class PicoExplorer extends JPanel {
         if (!btnSim.isEnabled()) {   // ya hay un arranque en curso
             return listo(Resultado.mal("micro_simulado: ya hay un arranque en curso"));
         }
-        /* V9 #871 — `de_cero`: vaciarlo y arrancarlo como la primera vez (si estaba en marcha, se para antes). */
+        /* V9 #871 — `de_cero`: vaciarlo (sus archivos y su zona de packs; su configuración se queda) y arrancarlo con
+         * la librería de esta instalación (si estaba en marcha, se para antes). */
         List<java.nio.file.Path> vaciados;
         if (quiere(p, "de_cero", false)) {
             if (sim.isRunning()) {
@@ -1476,8 +1477,8 @@ public final class PicoExplorer extends JPanel {
             } catch (IOException ex) {
                 return listo(Resultado.mal("micro_simulado: no se pudo vaciar: " + ex.getMessage()));
             }
-            emitLine("[sim] vaciado, como la primera vez: " + (vaciados.isEmpty() ? "ya estaba vacío"
-                    : vaciados.size() + " fichero(s) borrado(s) en " + vaciados.get(0).getParent()) + "\n");
+            emitLine("[sim] " + (vaciados.isEmpty() ? "ya estaba vacío"
+                    : "vaciado: sus archivos y su zona de packs (su configuración se queda)"));
             p = new HashMap<>(p);
             p.put("arrancar", Boolean.TRUE);
         }
@@ -1514,7 +1515,7 @@ public final class PicoExplorer extends JPanel {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
                     status.setText("no arrancó el simulador");
-                    emitLine("[sim ERROR] " + msg + "\n");
+                    emitLine("[sim ERROR] " + msg);
                     updateSimUI();
                     fin.complete(Resultado.mal("micro_simulado: no arrancó: " + msg));
                 }
@@ -1579,7 +1580,7 @@ public final class PicoExplorer extends JPanel {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
                     String msg = cause.getMessage() == null ? cause.toString() : cause.getMessage();
                     status.setText("no arrancó la VM Java");
-                    emitLine("[vm-java ERROR] " + msg + "\n");
+                    emitLine("[vm-java ERROR] " + msg);
                     updateVmUI();
                     fin.complete(Resultado.mal("vm_java: no arrancó: " + msg));
                 }
@@ -1600,7 +1601,7 @@ public final class PicoExplorer extends JPanel {
                     + (prefs.simNoScreen ? "ninguna"
                                          : prefs.simScreenW + "x" + prefs.simScreenH) + "\n");
             if (sim.isRunning())
-                emitLine("[sim] para y arranca el simulador para aplicarla\n");
+                emitLine("[sim] para y arranca el simulador para aplicarla");
             updateSimUI();
         }
     }

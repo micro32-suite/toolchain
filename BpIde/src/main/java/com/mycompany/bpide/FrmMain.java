@@ -4499,6 +4499,12 @@ public class FrmMain extends javax.swing.JFrame
         int n = 0;
         int skipped = 0;
         final java.util.Set<String> stdlib = stdlibBasenames(outDir);
+        /* V9 #877 — el programa que se ejecuta sube SIEMPRE, aunque se llame como un módulo de la stdlib (`App`, el de
+         * App.projectPath(); y así se llama el principal de samples/sampleproject): saltárselo era ejecutar lo que no
+         * está («falta el modulo 'App'»). El filtro es para las copias de la stdlib en outDir, no para él; a la placa,
+         * `Despliegue` ya lo sube siempre. */
+        final String principal = entryName == null ? null
+                : entryName.toLowerCase().endsWith(".mod") ? entryName.substring(0, entryName.length() - 4) : entryName;
         try (java.util.stream.Stream<Path> s = Files.list(outDir)) {
             java.util.List<Path> files = s
                     .filter(p -> {
@@ -4511,7 +4517,7 @@ public class FrmMain extends javax.swing.JFrame
                 String name = p.getFileName().toString();
                 int dot = name.lastIndexOf('.');
                 String base = (dot > 0) ? name.substring(0, dot) : name;
-                if (stdlib.contains(base)) {
+                if (stdlib.contains(base) && !base.equals(principal)) {
                     skipped++;
                     continue;   // la VM lo resuelve desde --stdlibDir
                 }

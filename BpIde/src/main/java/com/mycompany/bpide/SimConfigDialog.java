@@ -123,24 +123,33 @@ public final class SimConfigDialog {
         row = addSep(panel, c, row, "Empezar de cero");
         JButton vaciar = new JButton("Vaciarlo (como la primera vez)…");
         vaciar.setEnabled(sim != null && !simRunning);
-        if (simRunning) vaciar.setToolTipText("Páralo antes de vaciarlo");
         vaciar.addActionListener(e -> {
-            int ok = JOptionPane.showConfirmDialog(panel, "Se borran su FS, su flash y su zona de packs (en "
-                    + prefs.simDataDirEffective() + "):\nal arrancar será una placa nueva, con la librería de packs"
-                    + " de esta instalación.\n¿Vaciarlo?", "Vaciar el micro simulado", JOptionPane.YES_NO_OPTION,
-                    JOptionPane.WARNING_MESSAGE);
+            /* «todos sus archivos», no «su FS» (Eduardo, 23-nov: «FS la gente no tiene porque saber lo que es»); y su
+             * configuración, que se queda (al probarlo: «quizás destruir la partición no entraba»). */
+            int ok = JOptionPane.showConfirmDialog(panel, "Se borran todos sus archivos y su zona de packs (en "
+                    + prefs.simDataDirEffective() + ");\nsu configuración, las particiones, se queda.\nAl arrancar"
+                    + " tendrá la librería de packs de esta instalación.\n¿Vaciarlo?", "Vaciar el micro simulado",
+                    JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
             if (ok != JOptionPane.YES_OPTION) return;
             try {
+                /* Lo que cuenta vacia() son los ficheros del PC donde guarda lo suyo (micro.fs, micro.packs), no sus
+                 * archivos: «Vaciado: 2 fichero(s)» se leería como que tenía dos. */
                 int n = sim.vacia(prefs).size();
-                JOptionPane.showMessageDialog(panel, n == 0 ? "Ya estaba vacío." : "Vaciado: " + n + " fichero(s).");
+                JOptionPane.showMessageDialog(panel, n == 0 ? "Ya estaba vacío."
+                        : "Vaciado: al arrancar tendrá la librería de packs de esta instalación.");
                 vaciar.setEnabled(false);
             } catch (Exception ex) {
                 JOptionPane.showMessageDialog(panel, "No se pudo vaciar: " + ex.getMessage(), "Vaciar el micro simulado",
                         JOptionPane.ERROR_MESSAGE);
             }
         });
+        /* En marcha, el botón sale en gris: el porqué, escrito al lado (sólo en el tooltip, no se veía: Eduardo, 23-nov,
+         * «Está como desactivado»). */
+        JPanel filaVaciar = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+        filaVaciar.add(vaciar);
+        if (simRunning) filaVaciar.add(new JLabel("<html><i>Páralo antes de vaciarlo.</i></html>"));
         c.gridx = 1; c.gridy = row++; c.gridwidth = 2;
-        panel.add(vaciar, c);
+        panel.add(filaVaciar, c);
         c.gridwidth = 1;
 
         int r = JOptionPane.showConfirmDialog(parent, panel, "Micro simulado (VM-C)",
