@@ -120,26 +120,10 @@ public final class IdePrefs {
      *  (en el repo, el jar vive en toolchain/BpIde/target y el cfg en la raíz). Si no aparece ninguno, uno con las
      *  carpetas que viajan junto al jar (bpstdlib/, bpdevices/); null si tampoco están. Es el respaldo de cuando un
      *  fuente no tiene BpVM.cfg, ni subiendo desde él, y el IDE se lanzó desde una carpeta sin él: un programa de la
-     *  carpeta de la IA, por ejemplo, no encontraba ni {@code Core}. Se busca con sus propios pasos, no con
-     *  {@code loadDefaultFor}, que mira antes el cwd. */
+     *  carpeta de la IA, por ejemplo, no encontraba ni {@code Core}. Desde #853, la de la orden {@code bp} y la del
+     *  IDE son la misma ({@code basicplus.bp.Instalacion}), con la carpeta del IDE. */
     static edu.bpgenvm.config.VmConfig cfgDeLaInstalacion() {
-        for (Path d = installDir(); d != null; d = d.getParent()) {
-            Path f = d.resolve(edu.bpgenvm.config.VmConfig.DEFAULT_FILENAME);
-            if (Files.isRegularFile(f)) {
-                try { return edu.bpgenvm.config.VmConfig.load(f); }
-                catch (IOException ex) {
-                    System.err.println("Advertencia: no se pudo leer " + f + ": " + ex.getMessage());
-                    break;   // existe pero ilegible: como loadDefaultFor, no se sigue subiendo
-                }
-            }
-        }
-        Path lib = installSubdir("bpstdlib");
-        if (lib == null) return null;
-        edu.bpgenvm.config.VmConfig c = edu.bpgenvm.config.VmConfig.defaults();
-        c.stdlibDir = lib.toString();
-        Path dev = installSubdir("bpdevices");
-        if (dev != null) c.devicesDir = dev.toString();
-        return c;
+        return basicplus.bp.Instalacion.cfg(installDir());
     }
 
     /** V9 #867 — el BpVM.cfg que manda para {@code ancla} (un fuente, una carpeta de salida; null = sólo el cwd): el de
@@ -147,10 +131,7 @@ public final class IdePrefs {
      *  instalación del IDE. Lo mismo que hace el compilador (Main.setCfgDelHospedador): la stdlib con la que se compila
      *  y la que se le da a la VM, o la que se sube a la placa, son la misma. Nunca null. */
     static edu.bpgenvm.config.VmConfig cfgPara(Path ancla) {
-        edu.bpgenvm.config.VmConfig cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(ancla);
-        if (cfg.sourcePath != null) return cfg;
-        edu.bpgenvm.config.VmConfig suyo = cfgDeLaInstalacion();
-        return suyo != null ? suyo : cfg;
+        return basicplus.bp.Instalacion.cfgPara(ancla, cfgDeLaInstalacion());
     }
 
     /** #363 — la carpeta de documentación: los CINCO volúmenes + sus imágenes.

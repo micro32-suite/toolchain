@@ -69,6 +69,29 @@ public final class Main {
     public static void setCfgDelHospedador(edu.bpgenvm.config.VmConfig cfg) {
         cfgDelHospedador = cfg;
     }
+
+    /** El nombre del módulo de un fuente (su {@code module Nombre}): el del .mod que escribe el compilador. Sin
+     *  declaración, el nombre del fichero sin la extensión. V9 #853: lo usan el IDE (antes era suyo, el
+     *  {@code inferModuleName} de FrmMain) y la orden {@code bp}; uno para los dos, que no se separen. */
+    public static String nombreDelModulo(Path fuente) {
+        try {
+            for (String line : Files.readAllLines(fuente, java.nio.charset.StandardCharsets.UTF_8)) {
+                String t = line.trim();
+                if (t.isEmpty() || t.startsWith("//")) continue;
+                if (t.startsWith("library")) continue;
+                if (t.startsWith("module")) {
+                    String rest = t.substring("module".length()).trim();
+                    int end = 0;
+                    while (end < rest.length()
+                            && (Character.isJavaIdentifierPart(rest.charAt(end)) || rest.charAt(end) == '.')) end++;
+                    if (end > 0) return rest.substring(0, end);
+                }
+            }
+        } catch (IOException ignored) { }
+        String fn = fuente.getFileName().toString();
+        int dot = fn.lastIndexOf('.');
+        return (dot > 0) ? fn.substring(0, dot) : fn;
+    }
     /** V7/H2 (#523, V1) — el guardián del compilador: permutar las ranuras propias de cada clase
      *  (semilla; 0 = identidad) y meter n miembros privados de relleno. Ver {@link Barajar}. */
     public static int BARAJAR = 0, RELLENO = 0;

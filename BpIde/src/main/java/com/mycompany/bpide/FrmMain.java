@@ -4625,24 +4625,7 @@ public class FrmMain extends javax.swing.JFrame
      * cómo se llamará el .mod. Fallback al basename del fichero.
      */
     private String inferModuleName(Path bp) {
-        try {
-            for (String line : Files.readAllLines(bp, StandardCharsets.UTF_8)) {
-                String t = line.trim();
-                if (t.isEmpty() || t.startsWith("//")) continue;
-                if (t.startsWith("library")) continue;
-                if (t.startsWith("module")) {
-                    String rest = t.substring("module".length()).trim();
-                    int end = 0;
-                    while (end < rest.length()
-                            && (Character.isJavaIdentifierPart(rest.charAt(end))
-                                || rest.charAt(end) == '.')) end++;
-                    if (end > 0) return rest.substring(0, end);
-                }
-            }
-        } catch (IOException ignored) { }
-        String fn = bp.getFileName().toString();
-        int dot = fn.lastIndexOf('.');
-        return (dot > 0) ? fn.substring(0, dot) : fn;
+        return basicplus.frontend.Main.nombreDelModulo(bp);   // V9 #853: la misma que la de `bp`, del compilador
     }
 
     /**
