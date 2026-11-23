@@ -108,6 +108,37 @@ public final class SimRunner {
         return out;
     }
 
+    /** Los ficheros de la placa simulada, en su carpeta de datos: la flash (el ENV), el FS y la zona de packs. */
+    static final String[] ESTADO = { "micro.flash", "micro.fs", "micro.packs" };
+
+    /** V9 #871 — VACÍA el micro simulado (Eduardo, 23-nov: «un parámetro para vaciar la VM y que arranque como si
+     *  fuese la primera vez»): borra su flash, su FS y su zona de packs, y nada más de su carpeta. El arranque
+     *  siguiente es el de una placa nueva: con la zona de packs virgen, se graba la librería de esta instalación (#809),
+     *  y en el FS no queda nada de antes (en la prueba de la IA del 23-nov, un /app con Core, Gui… de una versión
+     *  anterior tapaba los de la placa). Con el simulador en marcha no se puede (sus ficheros están abiertos): lanza.
+     *  Devuelve los que ha borrado. */
+    synchronized List<Path> vacia(IdePrefs prefs) throws IOException {
+        if (isRunning()) throw new IOException("el micro simulado está en marcha: páralo antes de vaciarlo");
+        Path dataDir = Paths.get(prefs.simDataDirEffective());
+        List<Path> borrados = new ArrayList<>();
+        for (String f : ESTADO) {
+            Path p = dataDir.resolve(f);
+            /* Windows suelta los ficheros de un proceso que acaba de morir con un poco de retraso: unos reintentos,
+             * hasta ~3 s; si sigue sin poder, el motivo de Windows. */
+            for (int intento = 0; ; intento++) {
+                try {
+                    if (Files.deleteIfExists(p)) borrados.add(p);
+                    break;
+                } catch (java.nio.file.FileSystemException ex) {
+                    if (intento >= 15) throw ex;
+                    try { Thread.sleep(200); }
+                    catch (InterruptedException ie) { Thread.currentThread().interrupt(); throw ex; }
+                }
+            }
+        }
+        return borrados;
+    }
+
     /** Arranca el simulador con la configuración de `prefs` y espera a que acepte
      *  conexiones. Devuelve el endpoint "host:puerto", o lanza si no arranca. */
     public synchronized String start(IdePrefs prefs) throws IOException {
@@ -212,9 +243,14 @@ public final class SimRunner {
         Process p = proc;
         proc = null;
         p.destroy();
-        try { p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS); }
-        catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
-        if (p.isAlive()) p.destroyForcibly();
+        try {
+            if (!p.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                /* V9 #871 — y hasta que acabe de verdad: con sus ficheros abiertos, vaciarlo (o un arranque nuevo
+                 * sobre los mismos) fallaría en Windows. */
+                p.waitFor(5, java.util.concurrent.TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
         say("[sim] parado\n");
     }
 }

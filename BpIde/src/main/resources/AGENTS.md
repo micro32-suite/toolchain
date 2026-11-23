@@ -41,6 +41,14 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
 If the IDE has its AI server on (menu IA), its tools do the same from the IDE: open a source, compile, run on the PC,
 on the simulated micro or on a board (connect first), with the output and the exit code.
 
+- **A board keeps its standard library** (its `Stdlib.pack`), and the IDE does not upload a library the board already
+  has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's library is
+  older than this installation's: tell the user to burn this installation's packs on the board (IDE, Packs panel;
+  `@INSTALACION@docs/INSTALAR_FIRMWARE.md`).
+- **The simulated micro keeps its state** between runs, like a board (its file system and its packs). If it carries
+  things from before (old files in `/app`, a library that does not export what the program uses),
+  `micro_simulado` with `de_cero: true` empties it and starts it as the first time, with this installation's library.
+
 ## Traps for those coming from Java or C#
 
 | You would write | In BasicPlus |
@@ -92,6 +100,8 @@ the same, with the same names and the same traps as above.
   function event btn_onClick(who: Gui.Component) … end btn_onClick
   ```
 - The default font has no accented letters or `ñ` (they show as a box); `°` works.
+- The screen size depends on where it runs: 480x320 on the PC (unless `--screen=WxH`), the one in its settings on the
+  simulated micro, the panel's on a board. Lay out with `align` relative to the screen, not with fixed coordinates.
 - A button whose size you set by hand does not center its text: `btn.childAt(0).align(Gui.Align.CENTER, 0, 0)`.
 - To test it with nobody in front of it:
   - `print Gui.__guiDumpTree()` dumps the widget tree as text: compare that.
@@ -101,7 +111,8 @@ the same, with the same names and the same traps as above.
     returns when someone calls `Gui.stop()` or closes it.
   - `Gui.shot("X.shot")` writes a capture (call `sleep(300)` before, so the screen gets painted), and
     `bp png X.shot` turns it into `X.png`. The capture that counts is LVGL's: `bp run --c --no-screen X.bp`. The
-    Java VM paints with Swing, an approximation.
+    Java VM paints with Swing, an approximation. On a board, the capture stays in its file system (a relative path,
+    at its root): download it (`placa_bajar`, or `get` in the IDE console) and turn it into a PNG the same way.
 - Models to copy: `samples/GuiShot.bp`, `samples/GuiClickDemo.bp`, `samples/ChartDemo.bp`.
 
 ## Hardware

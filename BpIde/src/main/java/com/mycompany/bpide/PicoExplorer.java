@@ -357,7 +357,11 @@ public final class PicoExplorer extends JPanel {
                 .explica("Arranca el micro simulado (una placa que corre en el PC: la VM-C) y conecta el IDE a él; o lo"
                         + " para. Al arrancarlo, devuelve lo de la conexión.")
                 .parametro("arrancar", "sino", "true lo arranca (y se conecta) y false lo para; sin él, alterna (como"
-                        + " el botón)");
+                        + " el botón)")
+                .parametro("de_cero", "sino", "true lo VACÍA antes de arrancarlo (su FS, su flash y su zona de packs)"
+                        + " y arranca como la primera vez, con la librería de esta instalación; si estaba en marcha, lo"
+                        + " para antes. Para cuando lo que tiene es de antes: una librería que no exporta lo que usa el"
+                        + " programa, o ficheros viejos en /app");
         comandos.registra("simulado_config", "Configurar el micro simulado", p -> {
             onSimConfig();
             return listo(Resultado.bien("hecho"));
@@ -1906,6 +1910,24 @@ public final class PicoExplorer extends JPanel {
         if (!btnSim.isEnabled()) {   // ya hay un arranque en curso
             return listo(Resultado.mal("micro_simulado: ya hay un arranque en curso"));
         }
+        /* V9 #871 — `de_cero`: vaciarlo y arrancarlo como la primera vez (si estaba en marcha, se para antes). */
+        List<java.nio.file.Path> vaciados;
+        if (quiere(p, "de_cero", false)) {
+            if (sim.isRunning()) {
+                if (isConnected()) soltarConexion("Disconnected");
+                sim.stop();
+                updateSimUI();
+            }
+            try {
+                vaciados = sim.vacia(IdePrefs.load());
+            } catch (IOException ex) {
+                return listo(Resultado.mal("micro_simulado: no se pudo vaciar: " + ex.getMessage()));
+            }
+            emitLine("[sim] vaciado, como la primera vez: " + (vaciados.isEmpty() ? "ya estaba vacío"
+                    : vaciados.size() + " fichero(s) borrado(s) en " + vaciados.get(0).getParent()) + "\n");
+            p = new HashMap<>(p);
+            p.put("arrancar", Boolean.TRUE);
+        }
         if (!quiere(p, "arrancar", !sim.isRunning())) {
             if (!sim.isRunning()) return listo(Resultado.bien("el micro simulado no estaba en marcha"));
             if (isConnected()) soltarConexion("Disconnected");   // toggle: aquí desconecta
@@ -2016,7 +2038,7 @@ public final class PicoExplorer extends JPanel {
     /** Botón del engranaje: la ventana de configuración del micro simulado. */
     private void onSimConfig() {
         IdePrefs prefs = IdePrefs.load();
-        if (SimConfigDialog.show(this, prefs, sim.isRunning())) {
+        if (SimConfigDialog.show(this, prefs, sim)) {
             /* La biblioteca de packs se aplica YA (el compilador es in-process):
              * si el usuario acaba de apuntarla, el siguiente Compile la usa. */
             basicplus.frontend.Main.setPacksDir(prefs.packsDirEffective());
@@ -3146,8 +3168,10 @@ public final class PicoExplorer extends JPanel {
         long rh = ilong(m, "rtosHeapMinFreeBytes"), vt = ilong(m, "vmTaskStackFreeBytes");
         if (rh > 0) sb.append("RTOS libre  : ").append(human(rh))
                       .append(" (mínimo histórico de ucHeap)\n");
+        /* V9 #872 — sin el total: los 16 KB eran los de vm_task en la Pico; en las ESP32 la marca es la de la tarea
+         * del REPL (en la P4, wire_uart), de otro tamaño, y salía «25 KB sin usar de 16 KB». */
         if (vt > 0) sb.append("Pila VM     : ").append(human(vt))
-                      .append(" sin usar de 16 KB (marca de agua)\n");
+                      .append(" sin usar (marca de agua)\n");
         sb.append("FS          : ").append(human(ilong(m, "fsUsedBytes"))).append(" / ")
           .append(human(ilong(m, "fsTotalBytes"))).append('\n');
         long up = ilong(m, "uptimeMs");

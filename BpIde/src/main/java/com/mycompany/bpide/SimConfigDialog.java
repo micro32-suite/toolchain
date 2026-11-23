@@ -31,8 +31,10 @@ public final class SimConfigDialog {
         { "ESP32-P4 Waveshare 480x800",  1024,    32768,    16384,  480,  800 },
     };
 
-    /** Abre el diálogo. Devuelve true si el usuario aceptó (prefs ya guardadas). */
-    public static boolean show(Component parent, IdePrefs prefs, boolean simRunning) {
+    /** Abre el diálogo. Devuelve true si el usuario aceptó (prefs ya guardadas). {@code sim}, el del panel: si está en
+     *  marcha (los cambios, al siguiente arranque) y para vaciarlo (V9 #871). */
+    public static boolean show(Component parent, IdePrefs prefs, SimRunner sim) {
+        boolean simRunning = sim != null && sim.isRunning();
         JSpinner spPort   = intSpinner(prefs.simPort,     1024, 65535, 1);
         JSpinner spRam    = intSpinner(prefs.simRamKb,      64, 65536, 64);
         JSpinner spPsram  = intSpinner(prefs.simPsramKb,     0, 65536, 512);
@@ -115,6 +117,31 @@ public final class SimConfigDialog {
 
         row = addSep(panel, c, row, "Conexión");
         row = addSpin(panel, c, row, "Puerto TCP:", spPort);
+
+        /* V9 #871 — vaciarlo, como la primera vez (Eduardo, 23-nov: «un parámetro para vaciar la VM y que arranque
+         * como si fuese la primera vez»); el comando micro_simulado lo hace con `de_cero`. */
+        row = addSep(panel, c, row, "Empezar de cero");
+        JButton vaciar = new JButton("Vaciarlo (como la primera vez)…");
+        vaciar.setEnabled(sim != null && !simRunning);
+        if (simRunning) vaciar.setToolTipText("Páralo antes de vaciarlo");
+        vaciar.addActionListener(e -> {
+            int ok = JOptionPane.showConfirmDialog(panel, "Se borran su FS, su flash y su zona de packs (en "
+                    + prefs.simDataDirEffective() + "):\nal arrancar será una placa nueva, con la librería de packs"
+                    + " de esta instalación.\n¿Vaciarlo?", "Vaciar el micro simulado", JOptionPane.YES_NO_OPTION,
+                    JOptionPane.WARNING_MESSAGE);
+            if (ok != JOptionPane.YES_OPTION) return;
+            try {
+                int n = sim.vacia(prefs).size();
+                JOptionPane.showMessageDialog(panel, n == 0 ? "Ya estaba vacío." : "Vaciado: " + n + " fichero(s).");
+                vaciar.setEnabled(false);
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(panel, "No se pudo vaciar: " + ex.getMessage(), "Vaciar el micro simulado",
+                        JOptionPane.ERROR_MESSAGE);
+            }
+        });
+        c.gridx = 1; c.gridy = row++; c.gridwidth = 2;
+        panel.add(vaciar, c);
+        c.gridwidth = 1;
 
         int r = JOptionPane.showConfirmDialog(parent, panel, "Micro simulado (VM-C)",
                 JOptionPane.OK_CANCEL_OPTION, JOptionPane.PLAIN_MESSAGE);
