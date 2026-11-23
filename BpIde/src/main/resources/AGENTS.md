@@ -45,8 +45,9 @@ code. Files on the PC: only inside the folder the user allowed.
 
 - **The server is off until the user allows it.** If it does not answer: with the IDE open, the user turns it on (menu
   IA); with the IDE closed, open it yourself, in the background (it is a window):
-  `@INSTALACION@bpide.bat --ia=<your working folder>`. The IDE first asks the user, and writes how it went in one line
-  of its output: `[ia] servidor para la IA en …` if allowed, another `[ia] …` line if not. Then connect (or reconnect).
+  `@INSTALACION@bpide.bat --ia=<the absolute path of your working folder>` (from bash, if both paths have spaces, cmd
+  cannot start it: use PowerShell). The IDE first asks the user, and writes how it went in one line of its output:
+  `[ia] servidor para la IA en …` if allowed, another `[ia] …` line if not. Then connect (or reconnect).
 - **A board keeps its standard library** (its `Stdlib.pack`), and the IDE does not upload a library the board already
   has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's library is
   older than this installation's: tell the user to burn this installation's packs on the board (IDE, Packs panel;
