@@ -175,6 +175,12 @@ public abstract class AbstractBpvmBackend implements Backend {
 
     public edu.bpgenvm.vm.debug.ExitedEvent ultimoExited() { return ultimoExited; }
 
+    /** V9 #857 — ¿las líneas de la traza («  en X.bp:8 (Main)»…), tras la salida del programa, por el mismo sink? En el
+     *  IDE, sí (la consola). `bp` las escribe en la salida de errores: en la estándar, sólo lo del programa (#855). */
+    private volatile boolean trazaEnLaSalida = true;
+
+    public void sinTrazaEnLaSalida() { trazaEnLaSalida = false; }
+
     @Override public String run(String path, String arg, Consumer<String> lineSink) throws IOException {
         require();
         final BpvmClient c = this.client;                    // #803: close() lo pone a null desde otro hilo
@@ -212,7 +218,7 @@ public abstract class AbstractBpvmBackend implements Backend {
                         (edu.bpgenvm.vm.debug.ExitedEvent) ev;
                 // V8 #582 — dónde: la placa da posiciones, y el .dbg las hace líneas.
                 java.util.List<String> donde = TrazaError.traduce(e.stackTrace);
-                if (lineSink != null)
+                if (lineSink != null && trazaEnLaSalida)
                     for (String l : TrazaError.lineas(donde)) lineSink.accept(l);   // V8 #788: el mismo formato que la VM local
                 // BpvmClient.handleMessage ya consolidó reason desde
                 // {errorMessage → reason → status}. "(OK)" en éxito,

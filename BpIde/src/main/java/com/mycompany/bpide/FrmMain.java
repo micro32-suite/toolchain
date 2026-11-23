@@ -3299,35 +3299,11 @@ public class FrmMain extends javax.swing.JFrame
      * base-dir-first).
      */
     private String deviceAppPrefix() {
-        if (currentProjectFile == null) return "/app";
-        java.nio.file.Path dir = currentProjectFile.getParent();
-        if (dir == null || dir.getFileName() == null) return "/app";
-        String raw = dir.getFileName().toString();
-        StringBuilder sb = new StringBuilder();
-        for (int i = 0; i < raw.length() && sb.length() < 20; i++) {
-            char c = raw.charAt(i);
-            if ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z')
-                    || (c >= '0' && c <= '9') || c == '_' || c == '-') sb.append(c);
-            else sb.append('_');
-        }
-        return sb.length() == 0 ? "/app" : "/app/" + sb;
+        return Despliegue.prefijoEnLaPlaca(currentProjectFile);   // V9 #857: en Despliegue (también lo usa bp)
     }
 
     private java.util.Map<String, java.io.File> collectProjectResources() {
-        java.util.Map<String, java.io.File> out = new java.util.LinkedHashMap<>();
-        if (currentProjectFile == null) return out;
-        java.nio.file.Path rdir = currentProjectFile.getParent().resolve("resources");
-        if (!java.nio.file.Files.isDirectory(rdir)) return out;
-        final String prefix = deviceAppPrefix();   // F2: /app/<proj> o /app
-        try (java.util.stream.Stream<java.nio.file.Path> st = java.nio.file.Files.walk(rdir)) {
-            st.filter(java.nio.file.Files::isRegularFile).forEach(p -> {
-                String rel = rdir.relativize(p).toString().replace('\\', '/');
-                out.put(prefix + "/" + rel, p.toFile());
-            });
-        } catch (IOException ex) {
-            appendConsola("[resources] error leyendo " + rdir + ": " + ex.getMessage() + "\n");
-        }
-        return out;
+        return Despliegue.recursos(currentProjectFile, s -> appendConsola(s + "\n"));   // V9 #857: en Despliegue
     }
 
     /*
@@ -4153,18 +4129,7 @@ public class FrmMain extends javax.swing.JFrame
      *  decide a dónde iría una que la placa NO tenga (/lib); si la tiene, manda la
      *  respuesta de la placa. */
     private java.util.Set<String> stdlibDepNames(java.util.List<java.io.File> deps, Path outDir) {
-        java.util.Set<String> r = new java.util.HashSet<>();
-        String sdir = resolveStdlibDir(outDir);
-        if (sdir == null || deps == null) return r;
-        Path sp = java.nio.file.Paths.get(sdir);
-        for (java.io.File d : deps) {
-            String n = d.getName();
-            String base = n.endsWith(".mod") ? n.substring(0, n.length() - 4) : n;
-            if (Files.isRegularFile(sp.resolve(base + ".mod"))
-                    || Files.isRegularFile(sp.resolve(base + ".bp")))
-                r.add(n);
-        }
-        return r;
+        return Despliegue.deLaStdlib(deps, resolveStdlibDir(outDir));   // V9 #857: en Despliegue (también lo usa bp)
     }
 
     /**
@@ -4184,37 +4149,10 @@ public class FrmMain extends javax.swing.JFrame
      * al enlazar. Qué se sube de verdad lo sigue decidiendo la placa (uploadAndRun → {@code statModule}, #466).
      */
     private java.util.List<java.io.File> resolveDeviceDeps(Path bpFile, Path outDir, Path mainMod) {
-        java.util.List<java.io.File> result = new java.util.ArrayList<>();
-
-        java.util.List<Path> searchDirs = new java.util.ArrayList<>();
-        if (outDir != null) searchDirs.add(outDir);
-        Path stdlibPath = null;
-        try {
-            edu.bpgenvm.config.VmConfig cfg = IdePrefs.cfgPara(bpFile);   // V9 #867: sin cfg, el de la instalación
-            if (cfg.devicesDir != null && !cfg.devicesDir.isEmpty())
-                searchDirs.add(java.nio.file.Paths.get(cfg.devicesDir));
-            if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) {
-                stdlibPath = java.nio.file.Paths.get(cfg.stdlibDir);
-                searchDirs.add(stdlibPath);
-            }
-        } catch (Throwable ignored) { }
-        if (bpFile.getParent() != null) searchDirs.add(bpFile.getParent());
-
-        // Resolución TRANSITIVA, leída de los .mod (V7/H8 #538): Gui importa Json para el loader de Forms (H13.1),
-        // y hay que subir TODAS, no sólo las directas de la app. La stdlib, desde stdlibDir PRIMERO: un X.mod rancio
-        // en outDir (de un compile viejo) tiene otro layout de vtable y el INVOKE_VIRTUAL cross-module no resuelve
-        // en la placa (junio: I2c.Bus.read; y Json.JsonValue#asObject#15 en el P4, «exit 10 mudo»). Esa regla vive
-        // ahora en DependenciasDelMod, con su prueba (DependenciasDelModTest). La decisión final de subir o no la
-        // toma uploadAndRun según lo que YA exista en la placa.
-        try {
-            for (Path p : basicplus.frontend.DependenciasDelMod.paraSubir(mainMod, searchDirs, stdlibPath)) {
-                result.add(p.toFile());
-            }
-        } catch (java.io.IOException e) {
-            appendConsola("[deps] no se pudieron leer las dependencias de " + mainMod.getFileName()
-                    + ": " + e.getMessage() + "\n");
-        }
-        return result;
+        // V9 #857 — en Despliegue (también lo usa bp), con el cfg del fuente (#867: sin él, el de la instalación).
+        edu.bpgenvm.config.VmConfig cfg = null;
+        try { cfg = IdePrefs.cfgPara(bpFile); } catch (Throwable ignored) { }
+        return Despliegue.dependencias(bpFile, outDir, mainMod, cfg, s -> appendConsola(s + "\n"));
     }
 
     /**

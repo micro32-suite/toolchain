@@ -296,8 +296,15 @@ public final class BpvmClient implements AutoCloseable {
             // InputStream para que ese -1-de-timeout se vea como "esperar más"
             // en lugar de EOF.
             port.enableReceiveTimeout(500);
-        } catch (NoSuchPortException | PortInUseException
-                | UnsupportedCommOperationException e) {
+        } catch (PortInUseException e) {
+            /* V9 #857 — dicho para quien lo lee (una persona o una IA, con `bp placa`): purejavacomm decía
+             * «open COM15: errno() == 16». */
+            throw new IOException(portName + " está ocupado: lo tiene abierto otro programa (¿el IDE, conectado a esa"
+                    + " placa? ¿un monitor serie?) [" + e.getMessage() + "]", e);
+        } catch (NoSuchPortException e) {
+            throw new IOException("no hay ningún puerto " + portName + " (¿está enchufada la placa? ¿es otro puerto?)",
+                    e);   // purejavacomm: «open COM99: null»
+        } catch (UnsupportedCommOperationException e) {
             throw new IOException("open " + portName + ": " + e.getMessage(), e);
         }
         this.serialPort = port;

@@ -60,6 +60,7 @@ public final class Bp {
             case "png":   return png(resto);
             case "frontend": return frontend(resto);
             case "vm":       return vm(resto);
+            case "placa":    return placa(resto);   // V9 #857
             default:
                 System.err.println("bp: orden desconocida: " + orden);
                 ayuda(System.err);
@@ -76,6 +77,12 @@ public final class Bp {
         out.println("        compila si hace falta, y ejecuta con la VM Java; con --c, con la VM-C");
         out.println("        (sale con el código del programa; si no compila, con 2 y los errores)");
         out.println("        lo que va antes del fichero es para la VM: --no-screen, --screen=240x240…");
+        out.println("  bp run --placa=<COM22 | IP de una placa en la red> <fuente | proyecto | programa.mod> [argumento]");
+        out.println("  bp run --sim <…>");
+        out.println("        en una placa, o en el micro simulado del IDE (lo arranca si hace falta): sube lo que");
+        out.println("        haga falta, como el IDE, y lo ejecuta; su salida y su código, como con las VMs del PC");
+        out.println("  bp placa <COM22 | IP | sim> ls [ruta] | get <ruta> [fichero] | stop | info");
+        out.println("        lista sus ficheros, baja uno (una captura: get /X.shot), para lo que corre, su INFO");
         out.println("  bp png <captura.shot> [salida.png]");
         out.println("        una captura de Gui.shot, a PNG");
         out.println("  bp frontend <lo del compilador>");
@@ -187,12 +194,20 @@ public final class Bp {
 
     static int run(List<String> args) {
         boolean vmC = false;
+        String placa = null;   // V9 #857: --placa=<COMx|IP> o --sim (el micro simulado)
         List<String> sueltos = new ArrayList<>();
         List<String> opcionesDeLaVm = new ArrayList<>();   // lo que va entre `bp run` y el fichero: para la VM
         for (String a : args) {
             if ("--c".equals(a) && sueltos.isEmpty()) vmC = true;
+            else if ("--sim".equals(a) && sueltos.isEmpty()) placa = "sim";
+            else if (a.startsWith("--placa=") && sueltos.isEmpty()) placa = a.substring("--placa=".length());
             else if (a.startsWith("-") && sueltos.isEmpty()) opcionesDeLaVm.add(a);
             else sueltos.add(a);
+        }
+        if (placa != null && (vmC || !opcionesDeLaVm.isEmpty() || placa.isEmpty())) {
+            System.err.println("bp run: con --placa o --sim, ni --c ni opciones de la VM (son de las VMs del PC);"
+                    + " y --placa=, con su puerto o su IP");
+            return 1;
         }
         if (sueltos.isEmpty() || sueltos.size() > 2) {
             System.err.println("bp run: dime qué ejecutar (un fuente, un proyecto o un .mod) y, si acaso, su argumento");
@@ -239,6 +254,19 @@ public final class Bp {
                 return 2;
             }
         }
+        // V9 #857 — en una placa o en el micro simulado: lo hace el IDE (PlacaCli), como su Run on Device
+        if (placa != null) {
+            Path fuente = fichero.toAbsolutePath().normalize();
+            Path proyecto = nombre.endsWith(".bpbuild") ? fuente : null;
+            if (proyecto != null) {
+                try {   // un proyecto que sale en pack: a la placa va el .pack, cerrado (como en el IDE, #310)
+                    BpBuild proj = BpBuild.load(proyecto);
+                    Path pack = Paths.get(proj.outDir).resolve(proj.main + ".pack");
+                    if ("pack".equals(proj.out) && Files.isRegularFile(pack)) mod = pack;
+                } catch (IOException ignored) { /* el .mod, como hasta aquí */ }
+            }
+            return conLaPlaca(placa, fuente, mod, argumento, proyecto);
+        }
         /* La stdlib: la del BpVM.cfg que la VM encontrará sola (el del cwd, o subiendo desde el .mod), y si no hay
          * ninguno, la de la instalación. A la VM Java sólo hay que decírsela en el segundo caso (el cfg de la
          * instalación también es un fichero, pero ella no lo ve); a la VM-C, siempre (no lee BpVM.cfg). */
@@ -248,6 +276,52 @@ public final class Bp {
         String stdlib = (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) ? cfg.stdlibDir : null;
         return vmC ? conLaVmC(mod, argumento, stdlib, opcionesDeLaVm)
                    : conLaVmJava(mod, argumento, laEncuentraSola ? null : stdlib, opcionesDeLaVm);
+    }
+
+    // ---- la placa y el micro simulado (V9 #857: «Java, en bp, sobre lo del IDE») ----
+
+    /** El cable lo lleva el IDE: com.mycompany.bpide.PlacaCli, en su jar (en la instalación, el de bp; en el
+     *  repositorio, junto al del compilador en el classpath de bp). Por reflexión: el jar del compilador no lo ve. */
+    private static final String SIN_EL_IDE = "hace falta el jar del IDE, de V9 en adelante, y en el classpath no está"
+            + " (en el repositorio: mvn -f toolchain/BpIde/pom.xml package)";
+
+    private static Object delIde(String metodo, Class<?>[] tipos, Object... args) throws ReflectiveOperationException {
+        Class<?> k = Class.forName("com.mycompany.bpide.PlacaCli");
+        return k.getMethod(metodo, tipos).invoke(null, args);
+    }
+
+    static int conLaPlaca(String destino, Path fuente, Path mod, String argumento, Path proyecto) {
+        try {
+            return (Integer) delIde("ejecuta",
+                    new Class<?>[] { String.class, String.class, String.class, String.class, String.class },
+                    destino, fuente.toString(), mod.toString(), argumento, proyecto == null ? null : proyecto.toString());
+        } catch (ClassNotFoundException e) {
+            System.err.println("bp: para una placa o el micro simulado " + SIN_EL_IDE);
+            return 1;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            System.err.println("bp: " + destino + ": " + e.getCause());
+            return 1;
+        } catch (ReflectiveOperationException e) {
+            System.err.println("bp: " + e);
+            return 1;
+        }
+    }
+
+    // ---- placa ----
+
+    static int placa(List<String> args) {
+        try {
+            return (Integer) delIde("placa", new Class<?>[] { String[].class }, (Object) args.toArray(new String[0]));
+        } catch (ClassNotFoundException e) {
+            System.err.println("bp placa: " + SIN_EL_IDE);
+            return 1;
+        } catch (java.lang.reflect.InvocationTargetException e) {
+            System.err.println("bp placa: " + e.getCause());
+            return 1;
+        } catch (ReflectiveOperationException e) {
+            System.err.println("bp placa: " + e);
+            return 1;
+        }
     }
 
     /** Con la VM Java, aquí mismo. {@code stdlib}, sólo si la VM no la va a encontrar sola (sin BpVM.cfg a la vista). */

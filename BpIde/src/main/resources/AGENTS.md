@@ -40,6 +40,26 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
 - What the program prints on the PC is what it will print on a board: make it print what it does, and check that.
 - Options for the VM go before the program: `bp run --no-screen X.bp` (a GUI without a window; also with `--c`).
 
+## On a board or the simulated micro, without the IDE
+
+The same `bp`, with the IDE's own upload: only what the board does not already have, as the IDE's Run on Device.
+
+```
+bp run --sim X.bp              # on the simulated micro (it starts it if it is not running, and stops it at the end)
+bp run --placa=COM22 X.bp      # on a board, by its serial port (ask the user which); one on the network: --placa=<its IP>
+bp placa COM22 ls              # its files, with their size (also: bp placa sim ls)
+bp placa COM22 get X.shot      # download one, with its path as ls prints it
+bp placa COM22 info            # which board it is: name, architecture, memory, flash, pins…
+bp placa COM22 stop            # stop the program running on it
+```
+
+- Output and exit code as on the PC: on stdout only what the program prints; on stderr what was uploaded, and the
+  trace of an uncaught exception with its lines. The argument, after the program, as on the PC.
+- One client at a time: if the IDE is connected to that board or to the simulated micro, `bp` cannot use it, and says
+  so. Then use the IDE's tools (below), or ask the user to disconnect it.
+- The board's paths start with `/` (`/app/X.mod`). From Git Bash write them with two (`//app/X.mod`): bash turns
+  `/app` into a Windows path before `bp` sees it (if that happens, `bp` says so).
+
 ## With the IDE
 
 The IDE has a server for AI assistants (MCP, at `http://127.0.0.1:7340/mcp`; Claude Code connects to it, once, with
@@ -123,7 +143,8 @@ the same, with the same names and the same traps as above.
   - `Gui.shot("X.shot")` writes a capture (call `sleep(300)` before, so the screen gets painted), and
     `bp png X.shot` turns it into `X.png`. The capture that counts is LVGL's: `bp run --c --no-screen X.bp`. The
     Java VM paints with Swing, an approximation. On a board, the capture stays in its file system (a relative path,
-    at its root): download it (`placa_bajar`, or `get` in the IDE console) and turn it into a PNG the same way.
+    at its root): download it (`bp placa COM22 get X.shot`; with the IDE, `placa_bajar`) and turn it into a PNG the
+    same way.
 - Models to copy: `samples/GuiShot.bp`, `samples/GuiClickDemo.bp`, `samples/ChartDemo.bp`.
 
 ## Hardware
