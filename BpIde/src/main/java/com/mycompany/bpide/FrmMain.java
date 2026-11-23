@@ -3231,18 +3231,27 @@ public class FrmMain extends javax.swing.JFrame
                     return null;
                 }
 
-                // 1) La VM-C busca el exe y la stdlib subiendo desde el .bp
-                //    (misma convención de descubrimiento que BpVM.cfg).
+                // 1) La VM-C: la de la instalación (bin/bpgenvm-c.exe, la que trae el ZIP: V9 #853), o subiendo desde
+                //    el .bp hasta bpgenvm-c/build (el repositorio). Antes, sólo lo segundo: con el ZIP no la encontraba
+                //    nunca. Y la stdlib, la del BpVM.cfg que manda para el fuente (#867: la misma con la que se ha
+                //    compilado); antes, la bpstdlib/ de la carpeta de bpgenvm-c, aunque el fuente tuviera su cfg.
                 Path repoRoot = findUpwards(bpFile.getParent(), "bpgenvm-c");
-                Path exe = (repoRoot != null)
-                        ? repoRoot.resolve("bpgenvm-c").resolve("build").resolve("bpgenvm-c.exe") : null;
+                Path enBin = IdePrefs.installSubdir("bin");
+                Path exe = (enBin != null && Files.isRegularFile(enBin.resolve("bpgenvm-c.exe")))
+                        ? enBin.resolve("bpgenvm-c.exe")
+                        : (repoRoot != null ? repoRoot.resolve("bpgenvm-c").resolve("build").resolve("bpgenvm-c.exe")
+                                            : null);
                 if (exe == null || !Files.isRegularFile(exe)) {
-                    publish("[vmc] no encuentro bpgenvm-c/build/bpgenvm-c.exe subiendo desde "
-                            + bpFile.getParent() + " — compílala con `make LVGL=1`\n");
-                    motivo.set("no encuentro bpgenvm-c/build/bpgenvm-c.exe subiendo desde " + bpFile.getParent());
+                    publish("[vmc] no encuentro la VM-C: ni bin/bpgenvm-c.exe junto al IDE ni bpgenvm-c/build/"
+                            + "bpgenvm-c.exe subiendo desde " + bpFile.getParent() + " (en el repositorio, compílala"
+                            + " con `make LVGL=1`)\n");
+                    motivo.set("no encuentro la VM-C (bin/bpgenvm-c.exe junto al IDE)");
                     return null;
                 }
-                Path stdlib = repoRoot.resolve("bpstdlib");
+                edu.bpgenvm.config.VmConfig cfgStd = IdePrefs.cfgPara(bpFile);
+                Path stdlib = (cfgStd.stdlibDir != null && !cfgStd.stdlibDir.isEmpty())
+                        ? java.nio.file.Paths.get(cfgStd.stdlibDir)
+                        : (repoRoot != null ? repoRoot.resolve("bpstdlib") : outDir);
                 try {
                     int n = 0;
                     if (Files.isDirectory(stdlib) && !stdlib.equals(outDir)) {

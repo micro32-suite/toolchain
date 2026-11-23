@@ -289,12 +289,14 @@
   "ownership" determinístico para liberación inmediata de recursos.
 </p>
 <p>El pipeline general es:</p>
-<pre><code><span class="comment">// 1) Compilación: cada módulo → un .mod (binario, con su interfaz dentro)</span>
-java -jar basicplus-frontend.jar samples/hola.bp --compile out --backend=mivm
+<pre><code><span class="comment">// 1) Compilación: cada módulo → un .mod (binario, con su interfaz dentro), en samples/out/</span>
+bp build samples/hola.bp
 
 <span class="comment">// 2) Ejecución: la VM carga el .mod raíz; los .mod de los imports los
 //    busca por su nombre, &lt;library&gt;.&lt;Module&gt;.mod (§10.3)</span>
-java -jar bpgenvm.jar out/Hola.mod</code></pre>
+bp run samples/out/Hola.mod
+
+<span class="comment">// o las dos cosas a la vez (con --c, en la VM-C): bp run samples/hola.bp</span></code></pre>
 
 <!-- =========================================================== -->
 <!-- =========================================================== -->
@@ -2194,8 +2196,8 @@ e.etiqueta := <span class="str">"cuadrado de 2"</span>              <span class=
       como utilidad para testing standalone.</li>
   <li><strong>El argumento</strong> se pasa desde la consola del IDE con
       <code>run MiApp hola</code> (comillas opcionales si lleva espacios) y en las
-      dos VMs de PC como segundo posicional (<code>java -jar bpgenvm.jar MiApp.mod hola</code>,
-      <code>bpgenvm-c MiApp.mod hola</code>). Si no se pasa nada, <code>arg</code>
+      dos VMs de PC detrás del programa (<code>bp run MiApp.mod hola</code>,
+      <code>bp run --c MiApp.mod hola</code>). Si no se pasa nada, <code>arg</code>
       vale el <strong>valor por defecto</strong> declarado en la firma (<code>:= "defecto"</code>,
       como cualquier <a href="#defaults">parámetro con default</a>) o la cadena vacía si
       no lo hay. El <em>autorun</em> de la placa no pasa argumento a propósito: el

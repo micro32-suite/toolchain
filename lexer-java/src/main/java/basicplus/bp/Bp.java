@@ -52,6 +52,8 @@ public final class Bp {
             case "build": return build(resto);
             case "run":   return run(resto);
             case "png":   return png(resto);
+            case "frontend": return frontend(resto);
+            case "vm":       return vm(resto);
             default:
                 System.err.println("bp: orden desconocida: " + orden);
                 ayuda(System.err);
@@ -64,11 +66,16 @@ public final class Bp {
         out.println();
         out.println("  bp build <fuente.bp | fuente.jc | proyecto.bpbuild> [--out <carpeta>]");
         out.println("        compila: el .mod, en <la carpeta del fuente>/out (o en el outDir del proyecto)");
-        out.println("  bp run [--c] <fuente | proyecto.bpbuild | programa.mod> [argumento]");
+        out.println("  bp run [--c] [opciones de la VM] <fuente | proyecto.bpbuild | programa.mod> [argumento]");
         out.println("        compila si hace falta, y ejecuta con la VM Java; con --c, con la VM-C");
         out.println("        (sale con el código del programa; si no compila, con 2 y los errores)");
+        out.println("        lo que va antes del fichero es para la VM: --no-screen, --screen=240x240…");
         out.println("  bp png <captura.shot> [salida.png]");
         out.println("        una captura de Gui.shot, a PNG");
+        out.println("  bp frontend <lo del compilador>");
+        out.println("        el compilador, con todas sus opciones (--project, --interface, --dao, --escribir-jc…)");
+        out.println("  bp vm <lo de la VM Java>");
+        out.println("        la VM Java, con todas sus opciones (-d desensambla, --trace, --listen…)");
         out.println("  bp help");
         out.println("        esta ayuda");
         out.println();
@@ -159,12 +166,11 @@ public final class Bp {
     static int run(List<String> args) {
         boolean vmC = false;
         List<String> sueltos = new ArrayList<>();
+        List<String> opcionesDeLaVm = new ArrayList<>();   // lo que va entre `bp run` y el fichero: para la VM
         for (String a : args) {
-            if ("--c".equals(a)) vmC = true;
-            else if (a.startsWith("-") && sueltos.isEmpty()) {
-                System.err.println("bp run: opción desconocida: " + a);
-                return 1;
-            } else sueltos.add(a);
+            if ("--c".equals(a) && sueltos.isEmpty()) vmC = true;
+            else if (a.startsWith("-") && sueltos.isEmpty()) opcionesDeLaVm.add(a);
+            else sueltos.add(a);
         }
         if (sueltos.isEmpty() || sueltos.size() > 2) {
             System.err.println("bp run: dime qué ejecutar (un fuente, un proyecto o un .mod) y, si acaso, su argumento");
@@ -212,13 +218,15 @@ public final class Bp {
         boolean laEncuentraSola = suyo.sourcePath != null;
         VmConfig cfg = laEncuentraSola ? suyo : (instalacion != null ? instalacion : suyo);
         String stdlib = (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) ? cfg.stdlibDir : null;
-        return vmC ? conLaVmC(mod, argumento, stdlib) : conLaVmJava(mod, argumento, laEncuentraSola ? null : stdlib);
+        return vmC ? conLaVmC(mod, argumento, stdlib, opcionesDeLaVm)
+                   : conLaVmJava(mod, argumento, laEncuentraSola ? null : stdlib, opcionesDeLaVm);
     }
 
     /** Con la VM Java, aquí mismo. {@code stdlib}, sólo si la VM no la va a encontrar sola (sin BpVM.cfg a la vista). */
-    static int conLaVmJava(Path mod, String argumento, String stdlib) {
+    static int conLaVmJava(Path mod, String argumento, String stdlib, List<String> opciones) {
         List<String> a = new ArrayList<>();
         if (stdlib != null) a.add("--stdlibDir=" + stdlib);
+        a.addAll(opciones);
         a.add(mod.toString());
         if (argumento != null) a.add(argumento);
         try {
@@ -231,7 +239,7 @@ public final class Bp {
     }
 
     /** Con la VM-C: {@code bin/bpgenvm-c} de la instalación (en el repositorio, {@code bpgenvm-c/build}). */
-    static int conLaVmC(Path mod, String argumento, String stdlib) {
+    static int conLaVmC(Path mod, String argumento, String stdlib, List<String> opciones) {
         Path vm = laVmC(instalacion());
         if (vm == null) {
             System.err.println("bp run --c: no encuentro la VM-C (bin/" + nombreDeLaVmC() + " junto a la instalación)");
@@ -240,6 +248,7 @@ public final class Bp {
         List<String> a = new ArrayList<>();
         a.add(vm.toString());
         if (stdlib != null) a.add("--libdir=" + stdlib);
+        a.addAll(opciones);
         a.add(mod.toString());
         if (argumento != null) a.add(argumento);
         try {
@@ -269,6 +278,41 @@ public final class Bp {
             if (Files.isRegularFile(b)) return b;
         }
         return null;
+    }
+
+    // ---- frontend y vm: el compilador y la VM Java tal cual (Eduardo, 23-nov: «`bp frontend …` y `bp vm …`») ----
+
+    /** {@code bp frontend …}: el compilador con todas sus opciones (la referencia, §16.1). Sale él, con su código. Sin
+     *  BpVM.cfg a la vista, con la stdlib de la instalación (el respaldo del hospedador, #867). */
+    static int frontend(List<String> args) {
+        cfgDeLaInstalacion();
+        Main.main(args.toArray(new String[0]));
+        return 0;
+    }
+
+    /** {@code bp vm …}: la VM Java con todas sus opciones (§16.2). Si no se le dice la configuración y el programa no
+     *  tiene BpVM.cfg a la vista, con la stdlib de la instalación. Con un código distinto de 0, sale ella. */
+    static int vm(List<String> args) {
+        List<String> a = new ArrayList<>(args);
+        boolean dicha = false;
+        String programa = null;
+        for (String s : args) {
+            if (s.startsWith("--stdlibDir") || s.startsWith("--config") || "--no-config".equals(s)) dicha = true;
+            String n = s.toLowerCase(Locale.ROOT);
+            if (programa == null && (n.endsWith(".mod") || n.endsWith(".pack") || n.endsWith(".bpproject"))) programa = s;
+        }
+        VmConfig instalacion = Instalacion.cfg(instalacion());
+        if (!dicha && programa != null && instalacion != null && instalacion.stdlibDir != null
+                && VmConfig.loadDefaultFor(Paths.get(programa).toAbsolutePath()).sourcePath == null) {
+            a.add(0, "--stdlibDir=" + instalacion.stdlibDir);
+        }
+        try {
+            edu.bpgenvm.Main.main(a.toArray(new String[0]));
+        } catch (IOException e) {
+            System.err.println("bp vm: " + e.getMessage());
+            return 2;
+        }
+        return 0;
     }
 
     // ---- png ----
