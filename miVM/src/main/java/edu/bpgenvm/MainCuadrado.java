@@ -95,7 +95,7 @@ public class MainCuadrado {
             System.out.println("\n[Loader] Analizando dependencias y cargando módulos de forma automática...");
             loader.executeRootModule("Cliente.mod", "Cliente");
 
-            vm.run();
+            Demos.corre(vm);   // V9 #855: el inicio y el fin, la demo
 
         } catch (IOException e) {
             System.err.println("Error crítico en el ecosistema: " + e.getMessage());

@@ -77,7 +77,7 @@ public class MainData {
             ModuleManager loader = new ModuleManager(vm);
             vm.setModuleManager(loader);
             loader.executeRootModule("DataDemo.mod", "DataDemo");
-            vm.run();
+            Demos.corre(vm);   // V9 #855: el inicio y el fin, la demo
 
             System.out.println();
             System.out.println("Esperado (en orden): 0  100  200  100");

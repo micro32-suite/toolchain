@@ -112,7 +112,7 @@ public class MainFloats {
             ModuleManager loader = new ModuleManager(vm);
             vm.setModuleManager(loader);
             loader.executeRootModule("FloatDemo.mod", "FloatDemo");
-            vm.run();
+            Demos.corre(vm);   // V9 #855: el inicio y el fin, la demo
 
             System.out.println();
             System.out.println("Esperado (en orden):");

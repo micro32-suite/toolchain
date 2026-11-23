@@ -11,17 +11,15 @@
 // Las carpetas donde mirar los .dbg las va diciendo el IDE al compilar (conoce);
 // la stdlib se busca sola. Un módulo sin .dbg sale tal cual («Core+1200»): se
 // pierde la línea, no el dato. El espejo en Python, tools/traza_dbg.py.
+// V9 #855 (c): la traducción, en edu.bpgenvm.vm.debug.Traza (la VM Java y `bp`
+// la usan también), con la función; aquí, lo del IDE: las carpetas y la stdlib.
 // ============================================================
 package com.mycompany.bpide;
 
-import edu.bpgenvm.vm.debug.DbgFile;
-import java.nio.file.Files;
+import edu.bpgenvm.vm.debug.Traza;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 final class TrazaError {
@@ -44,48 +42,15 @@ final class TrazaError {
         return traduce(traza, donde);
     }
 
+    /** V9 #855 (c) — el traductor, uno (Eduardo: «Un traductor, en Java»), el de la VM Java, que también usan ella misma
+     *  y `bp`; ahora con la función: «Prueba.bp:23 (Main)». */
     static List<String> traduce(String traza, List<Path> donde) {
-        List<String> salida = new ArrayList<>();
-        if (traza == null || traza.trim().isEmpty()) return salida;
-        Map<String, DbgFile> dbgs = new HashMap<>();
-        for (String marco : traza.trim().split("\\s+")) {
-            int mas = marco.lastIndexOf('+');
-            if (mas <= 0) { salida.add(marco); continue; }
-            String mod = marco.substring(0, mas);
-            int rel;
-            try { rel = Integer.parseInt(marco.substring(mas + 1)); }
-            catch (NumberFormatException e) { salida.add(marco); continue; }
-            if (!dbgs.containsKey(mod)) dbgs.put(mod, busca(mod, donde));
-            DbgFile dbg = dbgs.get(mod);
-            if (dbg == null) { salida.add(marco); continue; }
-            int linea = dbg.lineForRelPc(rel - 1);
-            if (linea > 0) salida.add(fichero(dbg, mod) + ":" + linea);
-        }
-        return salida;
+        return Traza.marcos(traza, donde);
     }
 
     /** V8 #788 — las líneas de la consola: «  en X» el primero y «  llamado desde Y» los demás. Las mismas en el
-     *  camino de la placa (AbstractBpvmBackend.run) y en el de la VM local (TrazaDeLaVmLocal). */
+     *  camino de la placa (AbstractBpvmBackend.run) y en el de la VM local (TrazaDeLaVmLocal), y en la VM Java y `bp`. */
     static List<String> lineas(List<String> donde) {
-        List<String> out = new ArrayList<>(donde.size());
-        for (int i = 0; i < donde.size(); i++) out.add((i == 0 ? "  en " : "  llamado desde ") + donde.get(i));
-        return out;
-    }
-
-    private static DbgFile busca(String mod, List<Path> donde) {
-        for (Path c : donde) {
-            Path p = c.resolve(mod + ".dbg");
-            if (Files.exists(p)) {
-                DbgFile d = DbgFile.load(p.toString());   // null si no se lee: es como no tenerlo, sale la posición
-                if (d != null) return d;
-            }
-        }
-        return null;
-    }
-
-    private static String fichero(DbgFile dbg, String mod) {
-        String fuente = dbg.getSource();
-        if (fuente == null || fuente.isEmpty()) return mod + ".bp";
-        return Paths.get(fuente.replace('\\', '/')).getFileName().toString();
+        return Traza.lineas(donde);
     }
 }

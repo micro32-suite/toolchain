@@ -36,6 +36,7 @@ import edu.bpgenvm.vm.ModuleManager;
 import edu.bpgenvm.vm.VirtualMachine;
 import edu.bpgenvm.vm.debug.DebugController;
 import edu.bpgenvm.vm.debug.DebugServer;
+import edu.bpgenvm.vm.debug.Traza;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Paths;
@@ -82,6 +83,12 @@ public class Main {
                     break;
                 case "--no-config":
                     noConfig = true;
+                    break;
+                case "--no-screen":
+                    /* V9 #855 (a) — sin ventana, como la VM-C y el micro simulado (el mismo nombre): el modo sin pantalla
+                     * de Java, antes de cargar nada de AWT. Con escritorio, la GUI abría su ventana y Gui.run() esperaba
+                     * a que la cerraran: un proceso que lanza otro programa (una IA, un script) se quedaba colgado. */
+                    System.setProperty("java.awt.headless", "true");
                     break;
                 case "--config":
                     if (i + 1 >= args.length) {
@@ -235,7 +242,8 @@ public class Main {
                 System.exit(2); return;
             }
             runMod = project.mainModPath;
-            System.out.println("project: " + project.sourcePath
+            // V9 #855 (b) — lo de la VM, a la salida de errores: en la estándar, sólo lo que imprime el programa.
+            System.err.println("[miVM] project: " + project.sourcePath
                     + " (main=" + project.mainModPath
                     + ", modulePaths=" + project.modulePaths + ")");
         }
@@ -267,15 +275,16 @@ public class Main {
         if (cliStdlibDir != null && !cliStdlibDir.isEmpty()) {
             cfg.stdlibDir = cliStdlibDir;
         }
+        // V9 #855 (b) — la configuración, un diagnóstico más: a la salida de errores (en la estándar, sólo lo del programa).
         if (cfg.sourcePath != null) {
-            System.out.println("config: " + cfg.sourcePath
+            System.err.println("[miVM] config: " + cfg.sourcePath
                     + " (memorySize=" + cfg.memorySize
                     + ", stackBase=" + cfg.stackBase
                     + (cfg.stdlibDir == null ? "" : ", stdlibDir=" + cfg.stdlibDir)
                     + ")");
         } else if (cfg.stdlibDir != null) {
             // No hay BpVM.cfg pero sí stdlibDir via CLI — log para depurar.
-            System.out.println("config: defaults + --stdlibDir=" + cfg.stdlibDir);
+            System.err.println("[miVM] config: defaults + --stdlibDir=" + cfg.stdlibDir);
         }
 
         // Crear la VM (en daemon mode el moduleName se calcula tras runModule).
@@ -386,6 +395,8 @@ public class Main {
                 // V7/H2 — un símbolo cross-module que no resuelve: la misma línea por
                 // stdout que el host de la VM-C (test/main.c) y exit 1, en vez de una
                 // traza de Java. Los marcadores de vtable y de layout (#500) caen aquí.
+                // (V9 #855: se queda en stdout por ahora; la red la lee de ahí —compat.sh
+                // norma_caso, mezcla.py clasificar—. Pasarla a stderr, por decidir.)
                 System.out.println("=== ERROR DE LINK: " + enlace.getMessage() + " ===");
                 System.out.flush();
                 System.err.println("link " + runMod + ": " + enlace.getMessage());
@@ -427,7 +438,13 @@ public class Main {
                 exitCode = 1;
                 exitReason = "runtime: " + vm.getRuntimeError();
                 // V8 #582 — dónde, como la VM-C (test/main.c): por stderr, que es del runner.
-                if (!vm.getTrazaError().isEmpty()) System.err.println("=== traza: " + vm.getTrazaError() + " ===");
+                if (!vm.getTrazaError().isEmpty()) {
+                    System.err.println(Traza.PREFIJO + vm.getTrazaError() + " ===");
+                    // V9 #855 (c) — y con sus nombres (el fichero, la línea y la función): la VM Java tiene los .dbg.
+                    for (String l : Traza.lineas(vm.getTrazaError(), carpetasDeLosDbg(runMod, project, cfg))) {
+                        System.err.println(l);
+                    }
+                }
             }
             }   // #431: fin del `if (cargado)`
         } catch (Throwable t) {
@@ -473,6 +490,17 @@ public class Main {
         return fname != null && fname.toLowerCase().endsWith(".pack");
     }
 
+    /** V9 #855 (c) — dónde están los .dbg de lo que se ejecutó: junto al módulo raíz, en las carpetas del proyecto y en
+     *  la stdlib (el compilador deja cada .dbg al lado de su .mod). */
+    private static java.util.List<java.nio.file.Path> carpetasDeLosDbg(String runMod, BpProject project, VmConfig cfg) {
+        java.util.List<java.nio.file.Path> donde = new java.util.ArrayList<>();
+        java.nio.file.Path padre = Paths.get(runMod).toAbsolutePath().getParent();
+        if (padre != null) donde.add(padre);
+        if (project != null) for (String p : project.modulePaths()) donde.add(Paths.get(p));
+        if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) donde.add(Paths.get(cfg.stdlibDir));
+        return donde;
+    }
+
     private static String stripModExtension(String fname) {
         int dot = fname.lastIndexOf('.');
         if (dot >= 0 && fname.substring(dot).equalsIgnoreCase(".mod")) {
@@ -491,6 +519,8 @@ public class Main {
         out.println("  bpgenvm --workers=N             N workers SMP en paralelo (default 1; >1 experimental: race B1)");
         out.println("  bpgenvm --config <archivo>      configuración JSON (BpVM.cfg)");
         out.println("  bpgenvm --no-config             ignora cualquier BpVM.cfg auto-descubierto");
+        out.println("  bpgenvm --no-screen             sin ventana: la GUI corre sin pantalla, y Gui.run() vuelve en");
+        out.println("                                  cuanto no tiene nada que hacer (como la VM-C)");
         out.println("  bpgenvm --listen <puerto>       arranca servidor de debug TCP+JSON");
         out.println("  bpgenvm --wait-client           con --listen, bloquea hasta que conecte el IDE");
         out.println("  bpgenvm --workdir <dir>         sandbox: la VM sólo ve ficheros bajo este dir");

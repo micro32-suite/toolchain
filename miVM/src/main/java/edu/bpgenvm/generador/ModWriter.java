@@ -464,7 +464,11 @@ public class ModWriter {
             if (s.name.startsWith("__")) continue;
             vars.add(new VarDebugInfo(s.name, s.offsetBytes, s.sizeBytes, s.isArray, s.typeTag));
         }
-        if (!vars.isEmpty()) functionVarsDbg.put(funcName, vars);
+        /* V9 #855 (c) — TODAS las funciones, también las que no tienen ni parámetros ni locales (con la lista vacía).
+         * Quien busca la función de una posición (DbgFile.functionForRelPc, ModuleManager: la mayor que empieza antes)
+         * daba, en una sin variables, la ANTERIOR: la traza decía «IdeFalla.bp:11 (paso)» en Main, y el depurador,
+         * parado en ella, habría enseñado las locales de la otra. El .mod no cambia. */
+        functionVarsDbg.put(funcName, vars);
     }
 
     /** H6.a.1 — vars (params+locales) por función para el `.dbg`. Solo lectura. */

@@ -118,9 +118,10 @@ public final class TrazaVmLocalSmoke {
             System.out.println("    la consola: " + consola);
             List<String> donde = new ArrayList<>();
             for (String l : consola) if (l.startsWith("  en ") || l.startsWith("  llamado desde ")) donde.add(l);
-            check(donde.equals(java.util.Arrays.asList("  en IdeFallaLib.bp:7", "  llamado desde IdeFalla.bp:7",
-                                                       "  llamado desde IdeFalla.bp:11")),
-                  "dónde, con sus líneas y una vez: " + donde);
+            // V9 #855 (c): y con la función de cada línea
+            check(donde.equals(java.util.Arrays.asList("  en IdeFallaLib.bp:7 (divide)", "  llamado desde IdeFalla.bp:7 (paso)",
+                                                       "  llamado desde IdeFalla.bp:11 (Main)")),
+                  "dónde, con sus líneas, sus funciones y una vez: " + donde);
         } finally {
             try (java.util.stream.Stream<Path> w = Files.walk(tmp)) {
                 w.sorted(java.util.Comparator.reverseOrder())

@@ -3425,8 +3425,10 @@ public class VirtualMachine {
     private enum ExitSignal { HALT, THREAD_EXIT, YIELD }
 
     public void run() {
-        System.out.println("\n=== INICIANDO EJECUCIÓN DE LA VM ===");
-        System.out.printf("    heapStart=%d  STACK_BASE=%d  (heap libre=%d bytes) workers=%d%n",
+        /* V9 #855 (b) — sin «=== INICIANDO …» ni «=== FIN …»: en la salida estándar, sólo lo que imprime el programa
+         * (Eduardo, 23-nov: «En las VM la salida estándar tal cual … Es el IDE el que puede añadir … el Inicio y Fin de
+         * ejecución»). El reparto de la memoria, un diagnóstico más, a la salida de errores. */
+        System.err.printf("[miVM] heapStart=%d  STACK_BASE=%d  (heap libre=%d bytes) workers=%d%n",
                 heapStart, STACK_BASE, STACK_BASE - heapStart, numWorkers);
         // Propagamos PC/CS iniciales (puestos por setPC/setCS antes de run())
         // al ThreadContext main. A partir de aquí runOnContext opera SOLO
@@ -3540,7 +3542,6 @@ public class VirtualMachine {
         if (bluetooth != null) bluetooth.finDeRun();   // V8/H2: si el programa lo tocó, lo que diga /sys/bluetooth.json
         if (teclado != null) teclado.finDeRun();       // V8/H2, paso 2: y del teclado del SO, lo del programa
         if (raton != null) raton.finDeRun();           // V8/H2, paso 3: y del ratón del SO
-        System.out.println("=== FIN DE LA EJECUCIÓN ===");
     }
 
     /**

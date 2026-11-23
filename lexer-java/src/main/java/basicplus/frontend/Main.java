@@ -469,6 +469,30 @@ public final class Main {
         if (ctx.verbose && n > 0) System.out.println("  .bpi intermedios borrados: " + n);
     }
 
+    /** V9 #855 (d) — el uso, con las opciones de verdad (antes no nombraba --compile ni --backend, las de cada día).
+     *  Con --help, a la salida estándar; sin fichero, a la de errores. */
+    static void uso(java.io.PrintStream out) {
+        out.println("Uso: java -jar basicplus-frontend.jar <fichero.bp|fichero.jc> [opciones]      (o: bp frontend ...)");
+        out.println("     java -jar basicplus-frontend.jar --project <fichero.bpbuild> [opciones]");
+        out.println("Compilar:");
+        out.println("  --compile <carpeta>        deja en <carpeta> el .mod, su .dbg y su .bpi");
+        out.println("  --interface <carpeta>      sólo la interfaz (.bpi)");
+        out.println("  --project <f.bpbuild>      un proyecto: sus módulos, su main y, si lo pide, su pack");
+        out.println("  --backend=mivm|jvm         mivm (.mod, el de las dos VMs; por defecto) o jvm (.class, obsoleto)");
+        out.println("  --stdlibDir=<carpeta>      la stdlib (sus .mod), si no la da un BpVM.cfg");
+        out.println("  --formato=8|9              el formato del .mod (por defecto, " + FORMATO + ")");
+        out.println("  --prune-bpi                borra los .bpi del build al acabar");
+        out.println("  --dao                      con --project: genera los DAOs de sus entidades, sin compilar");
+        out.println("Sin --compile (sólo analiza): --tokens (los tokens), --ast (el árbol), --quiet (ninguno)");
+        out.println("JC, BasicPlus con llaves (a la salida estándar; de un fichero, o de una carpeta al comprobar):");
+        out.println("  --escribir-jc              BP -> JC");
+        out.println("  --escribir-bp              JC -> BP");
+        out.println("  --comprobar-jc             la ida y vuelta BP -> JC -> BP");
+        out.println("  --comprobar-bp             la ida y vuelta BP -> BP (el escritor de BP)");
+        out.println("  -h | --help                esta ayuda");
+        out.println("Sale con 0 si compila; con 2, si no (los errores, «[línea:columna] error ...»).");
+    }
+
     public static void main(String[] args)
     {
         String path = null;
@@ -495,6 +519,8 @@ public final class Main {
 
         for (int i = 0; i < args.length; i++) {
             String a = args[i];
+            // V9 #855 (d) — la ayuda: a la salida estándar y con 0 (antes, «--help» se tomaba por un fichero).
+            if ("--help".equals(a) || "-h".equals(a)) { uso(System.out); System.exit(0); return; }
             if ("--tokens".equals(a))      showAst    = false;
             else if ("--escribir-bp".equals(a))  { escribirBp = true;  showAst = false; showTokens = false; }
             else if ("--comprobar-bp".equals(a)) { comprobarBp = true; showAst = false; showTokens = false; }
@@ -583,12 +609,7 @@ public final class Main {
         }
 
         if (path == null) {
-            System.err.println("Uso: java -jar basicplus-frontend.jar <archivo.bp> [--tokens|--ast|--quiet]");
-            System.err.println("     java -jar basicplus-frontend.jar --project <archivo.bpbuild>");
-            System.err.println("     java -jar basicplus-frontend.jar <archivo.bp> --escribir-bp");
-            System.err.println("     java -jar basicplus-frontend.jar <archivo.bp|carpeta> --comprobar-bp");
-            System.err.println("     java -jar basicplus-frontend.jar <archivo.bp|carpeta> --escribir-jc");
-            System.err.println("     java -jar basicplus-frontend.jar <archivo.bp|carpeta> --comprobar-jc");
+            uso(System.err);
             System.exit(1);
             return;
         }

@@ -31,10 +31,12 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
 - `bp run` exits with the program's code: 0 if it ends well, 1 with an uncaught exception, 2 if it does not compile
   (then the errors go to stderr and nothing runs).
 - Errors come as `[line:column] error …`. Read the whole message: it usually says how to fix it.
-- Each VM adds lines of its own to the output (`config: …`, `[miVM] …`, `[bpvm …]`, `=== …`): they are not the
-  program's.
+- On stdout, only what the program prints, the same in both VMs: `bp run X.bp > out.txt` keeps just that. The VMs'
+  own lines (`[miVM] …`, `[bpvm] …`) go to stderr.
+- An uncaught exception says where, on stderr: `=== traza: X+122 X+39 ===`, and under it the file, the line and the
+  function (`  en X.bp:8 (Main)`, `  llamado desde …`).
 - What the program prints on the PC is what it will print on a board: make it print what it does, and check that.
-- Options for the VM go before the program: `bp run --c --no-screen X.bp` (a GUI without a window).
+- Options for the VM go before the program: `bp run --no-screen X.bp` (a GUI without a window; also with `--c`).
 
 ## With the IDE
 

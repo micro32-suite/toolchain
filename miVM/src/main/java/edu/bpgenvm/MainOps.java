@@ -91,7 +91,7 @@ public class MainOps {
             ModuleManager loader = new ModuleManager(vm);
             vm.setModuleManager(loader);
             loader.executeRootModule("DemoOps.mod", "DemoOps");
-            vm.run();
+            Demos.corre(vm);   // V9 #855: el inicio y el fin, la demo
 
             System.out.println();
             System.out.println("Esperado (en orden):");

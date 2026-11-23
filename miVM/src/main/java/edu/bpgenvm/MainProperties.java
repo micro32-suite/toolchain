@@ -138,7 +138,7 @@ public class MainProperties {
             ModuleManager loader = new ModuleManager(vm);
             vm.setModuleManager(loader);
             loader.executeRootModule("PropDemo.mod", "PropDemo");
-            vm.run();
+            Demos.corre(vm);   // V9 #855: el inicio y el fin, la demo
 
             System.out.println();
             System.out.println("Esperado:");

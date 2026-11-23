@@ -6,9 +6,15 @@ package basicplus.bp;
 import basicplus.frontend.BpBuild;
 import basicplus.frontend.Main;
 import edu.bpgenvm.config.VmConfig;
+import edu.bpgenvm.vm.debug.Traza;
 
+import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -252,7 +258,18 @@ public final class Bp {
         a.add(mod.toString());
         if (argumento != null) a.add(argumento);
         try {
-            Process p = new ProcessBuilder(a).inheritIO().start();
+            /* V9 #855 (c) — la salida estándar, tal cual (la del programa); la de errores pasa por aquí: debajo de su
+             * traza («=== traza: Rompe+122 … ===»), la misma con sus nombres. La VM-C no tiene el .dbg (como en la
+             * placa: la traducción es del lado del host); la VM Java la traduce ella. */
+            ProcessBuilder pb = new ProcessBuilder(a);
+            pb.redirectInput(ProcessBuilder.Redirect.INHERIT);
+            pb.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+            Process p = pb.start();
+            List<Path> donde = new ArrayList<>();
+            Path padre = mod.toAbsolutePath().getParent();
+            if (padre != null) donde.add(padre);
+            if (stdlib != null) donde.add(Paths.get(stdlib));
+            copiaLosErrores(p.getErrorStream(), donde);   // hasta que la VM cierre su salida de errores
             return p.waitFor();
         } catch (IOException e) {
             System.err.println("bp run --c: " + e.getMessage());
@@ -261,6 +278,34 @@ public final class Bp {
             Thread.currentThread().interrupt();
             return 1;
         }
+    }
+
+    /** V9 #855 (c) — la salida de errores de la VM-C, línea a línea y byte a byte (sin tocar su codificación); tras una
+     *  traza, sus líneas traducidas con los .dbg de {@code donde}. */
+    static void copiaLosErrores(InputStream in, List<Path> donde) throws IOException {
+        OutputStream err = new FileOutputStream(FileDescriptor.err);
+        InputStream bin = new BufferedInputStream(in);
+        ByteArrayOutputStream linea = new ByteArrayOutputStream();
+        int b;
+        while ((b = bin.read()) != -1) {
+            linea.write(b);
+            if (b == '\n') sueltaLinea(linea, err, donde);
+        }
+        if (linea.size() > 0) sueltaLinea(linea, err, donde);
+        err.flush();
+    }
+
+    private static void sueltaLinea(ByteArrayOutputStream linea, OutputStream err, List<Path> donde) throws IOException {
+        byte[] bytes = linea.toByteArray();
+        linea.reset();
+        err.write(bytes);
+        String traza = Traza.deLaLinea(new String(bytes, StandardCharsets.UTF_8));
+        if (traza != null) {
+            StringBuilder sb = new StringBuilder();
+            for (String l : Traza.lineas(traza, donde)) sb.append(l).append(System.lineSeparator());
+            err.write(sb.toString().getBytes(StandardCharsets.UTF_8));
+        }
+        err.flush();
     }
 
     static String nombreDeLaVmC() {

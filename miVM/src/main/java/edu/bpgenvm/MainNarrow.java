@@ -132,7 +132,7 @@ public class MainNarrow {
             ModuleManager loader = new ModuleManager(vm);
             vm.setModuleManager(loader);
             loader.executeRootModule("NarrowDemo.mod", "NarrowDemo");
-            vm.run();
+            Demos.corre(vm);   // V9 #855: el inicio y el fin, la demo
 
             System.out.println();
             System.out.println("Esperado (en orden):");

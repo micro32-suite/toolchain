@@ -11,6 +11,8 @@ import java.util.List;
  * Helpers para escribir tests que invocan a un Main*.main() existente,
  * capturan su stdout y parsean lo que la VM produjo entre los marcadores
  * "=== INICIANDO EJECUCIÓN DE LA VM ===" y "=== FIN DE LA EJECUCIÓN ===".
+ * V9 #855: esas marcas las escribe la DEMO (Demos.corre), no la VM: la VM ya
+ * no pone nada suyo en su salida estándar.
  *
  * Todo lo emitido FUERA de esa ventana (mensajes del compilador, "Esperado:"
  * y similares) se ignora a propósito.
