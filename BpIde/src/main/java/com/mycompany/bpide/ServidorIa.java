@@ -32,7 +32,7 @@ import java.util.function.Consumer;
  * basicplus http://127.0.0.1:<puerto>/mcp}) las lista y las llama, y recibe el resultado del comando en datos.</p>
  *
  * <p>Las reglas (las del análisis del H2, `#728`): escucha SÓLO en 127.0.0.1 y está apagado por defecto (se enciende
- * desde el menú IA); de los argumentos, sólo los parámetros documentados (lo que la ventana mete por su cuenta no lo
+ * desde el menú IA, o con el sí de la persona cuando la IA abre el IDE con --ia: `#873`); de los argumentos, sólo los parámetros documentados (lo que la ventana mete por su cuenta no lo
  * puede pasar la IA, y así no abre diálogos en la pantalla de quien usa el IDE); una ruta del PC, dentro de la carpeta
  * de la IA (la que se eligió al encenderlo); «un programa a la vez», el de los comandos; cada llamada y su resultado, en
  * la consola del IDE («[ia] …»); y un plazo por llamada (un programa que no acaba no deja a la IA esperando siempre).</p>

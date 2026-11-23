@@ -386,10 +386,14 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     /**
-     * @param args the command line arguments
+     * @param args los argumentos: uno, {@code --ia} o {@code --ia=<carpeta>} (V9 #873: la IA pide manejar el IDE)
      */
-    public static void main(String args[]) 
+    public static void main(String args[])
     {
+        // V9 #873 — los argumentos (Argumentos). Lo que no se entiende, a la salida de errores; el IDE se abre igual.
+        final Argumentos argumentos = Argumentos.de(args);
+        for (String e : argumentos.errores) System.err.println("bpide: " + e);
+
         // IDE-2 — Look & Feel NATIVO del SO (Windows/GTK/Aqua) en vez del "Metal"
         //         de Java que venía forzado. Si no está disponible, Swing se
         //         queda con el por defecto. Se fija antes de crear la ventana.
@@ -404,7 +408,12 @@ public class FrmMain extends javax.swing.JFrame
         /* Create and display the form */
         java.awt.EventQueue.invokeLater(new Runnable() {
             public void run() {
-                new FrmMain().setVisible(true);
+                FrmMain ventana = new FrmMain();
+                ventana.setVisible(true);
+                // V9 #873 — con --ia, lo primero, con la ventana ya a la vista: preguntar a la persona
+                if (argumentos.pideLaIa) {
+                    java.awt.EventQueue.invokeLater(() -> ventana.laIaPideElIde(argumentos.carpetaDeLaIa));
+                }
             }
         });
     }
@@ -2598,6 +2607,17 @@ public class FrmMain extends javax.swing.JFrame
             appendConsola("[ia] servidor para la IA, parado\n");
             return Resultado.bien("parado");
         }
+        Path carpeta = eligeCarpetaDeLaIa();
+        if (carpeta == null) {
+            miServidorIa.setSelected(false);
+            return Resultado.bien("cancelado");
+        }
+        return enciendeLaIa(carpeta);
+    }
+
+    /** La carpeta de la IA, en su diálogo (lo que es, dicho en él; de entrada, la última), con el aviso si es demasiado
+     *  amplia; null si la persona cancela. */
+    private Path eligeCarpetaDeLaIa() {
         IdePrefs pr = IdePrefs.load();
         JFileChooser fc = new JFileChooser();
         fc.setDialogTitle("La carpeta que puede tocar la IA");
@@ -2616,20 +2636,21 @@ public class FrmMain extends javax.swing.JFrame
             fc.setCurrentDirectory(propuesta.getParentFile() != null ? propuesta.getParentFile() : propuesta);
             fc.setSelectedFile(propuesta);
         }
-        if (fc.showDialog(this, "Elegir") != JFileChooser.APPROVE_OPTION || fc.getSelectedFile() == null) {
-            miServidorIa.setSelected(false);
-            return Resultado.bien("cancelado");
-        }
+        if (fc.showDialog(this, "Elegir") != JFileChooser.APPROVE_OPTION || fc.getSelectedFile() == null) return null;
         Path carpeta = fc.getSelectedFile().toPath().toAbsolutePath().normalize();
         if (demasiadoAmplia(carpeta)) {
             int r = JOptionPane.showConfirmDialog(this, "Con " + carpeta + ", la IA podrá tocar todo lo que hay ahí"
                     + " dentro.\n¿Seguro? (Mejor una carpeta sólo para el trabajo con la IA.)", "La carpeta de la IA",
                     JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
-            if (r != JOptionPane.YES_OPTION) {
-                miServidorIa.setSelected(false);
-                return Resultado.bien("cancelado");
-            }
+            if (r != JOptionPane.YES_OPTION) return null;
         }
+        return carpeta;
+    }
+
+    /** Lo enciende con `carpeta` como la de la IA: la consola dice dónde escucha y cómo conectarse, la guía para IA se
+     *  deja en la carpeta, y la carpeta se recuerda (la propuesta del diálogo la próxima vez). */
+    private Resultado enciendeLaIa(Path carpeta) {
+        IdePrefs pr = IdePrefs.load();
         try {
             servidorIa.arranca(pr.iaPuerto, carpeta);
         } catch (IOException ex) {
@@ -2676,13 +2697,146 @@ public class FrmMain extends javax.swing.JFrame
         } else {
             texto = "El servidor para la IA está parado: se enciende en IA → Servidor para la IA (MCP)."
                     + "\n\nAl encenderlo se elige la carpeta que puede tocar la IA; escucha sólo en este PC"
-                    + "\n(127.0.0.1, puerto " + IdePrefs.load().iaPuerto + ").";
+                    + "\n(127.0.0.1, puerto " + IdePrefs.load().iaPuerto + ")."
+                    + "\n\nO lo pide la IA, al abrir ella el IDE (bpide.bat --ia=<carpeta>): el IDE te lo"
+                    + "\npregunta nada más abrirse.";
         }
         JTextArea area = new JTextArea(texto);
         area.setEditable(false);
         area.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
         JOptionPane.showMessageDialog(this, new JScrollPane(area), "IA — cómo conectar", JOptionPane.PLAIN_MESSAGE);
         return Resultado.bien("hecho");
+    }
+
+    /* ===== V9 #873 — la IA abre el IDE y pide manejarlo ===== */
+
+    /** El título de la pregunta, y de su aviso si la carpeta no existe. */
+    private static final String LA_IA_PIDE = "La IA pide manejar el IDE";
+
+    /** La salida estándar del proceso, la de verdad, en UTF-8 (las rutas pueden llevar acentos): ahí lee quien abrió
+     *  el IDE con --ia cómo acabó su petición. Se guarda al cargar la clase porque compilar redirige System.out a la
+     *  consola mientras dura (invokeWithCapture). */
+    private static final PrintStream SALIDA = salidaUtf8();
+
+    private static PrintStream salidaUtf8() {
+        try {
+            return new PrintStream(new java.io.FileOutputStream(java.io.FileDescriptor.out), true, "UTF-8");
+        } catch (java.io.UnsupportedEncodingException e) {
+            return System.out;   // imposible: UTF-8 siempre está
+        }
+    }
+
+    /** Lo que dicen los argumentos del IDE: si la IA pide manejarlo ({@code --ia}) y con qué carpeta
+     *  ({@code --ia=<carpeta>}, tal cual; null: la elige la persona); y lo que no se entendió. */
+    static final class Argumentos {
+        boolean pideLaIa;
+        String carpetaDeLaIa;
+        final List<String> errores = new ArrayList<>();
+
+        static Argumentos de(String[] args) {
+            Argumentos a = new Argumentos();
+            for (String s : args) {
+                if (s.equals("--ia")) {
+                    a.pideLaIa = true;
+                    a.carpetaDeLaIa = null;
+                } else if (s.startsWith("--ia=")) {
+                    a.pideLaIa = true;
+                    String c = s.substring("--ia=".length());
+                    a.carpetaDeLaIa = c.isEmpty() ? null : c;
+                } else {
+                    a.errores.add("no conozco «" + s + "» (el IDE entiende --ia y --ia=<carpeta>)");
+                }
+            }
+            return a;
+        }
+    }
+
+    /**
+     * El IDE abierto con --ia (Eduardo, 23-nov: «añadir un parámetro al ejecutar el IDE que indique al IDE que lo
+     * primero que ha de hacer es preguntar al usuario si autoriza a la IA manejar el IDE. La carpeta de trabajo se la
+     * puede pasar la IA»). Lo primero, la pregunta; con un sí, el servidor se enciende como desde el menú IA. Lo sigue
+     * encendiendo la persona, desde la ventana (lo del H2.3): la IA sólo lo pide. La carpeta, la que pasa la IA; sin
+     * ella, la elige la persona, como en el menú. Cómo acaba, en una línea «[ia] …» en la salida estándar: la lee quien
+     * abrió el IDE (la IA), que si no sólo vería que el servidor no contesta.
+     */
+    void laIaPideElIde(String pedida) {
+        Path carpeta = null;
+        if (pedida != null) {
+            carpeta = carpetaQueExiste(pedida);
+            if (carpeta == null) {
+                JOptionPane.showMessageDialog(this, "Una IA pide manejar el IDE con la carpeta\n\n   " + pedida
+                        + "\n\nque no existe (o no es una carpeta). El servidor para la IA sigue apagado;\nse enciende"
+                        + " en el menú IA.", LA_IA_PIDE, JOptionPane.WARNING_MESSAGE);
+                cuentaALaIa("la carpeta " + pedida + " no existe (o no es una carpeta): el servidor para la IA sigue"
+                        + " apagado");
+                return;
+            }
+        }
+        boolean si = autorizaLaPersona(carpeta);
+        if (si && carpeta == null) {
+            carpeta = eligeCarpetaDeLaIa();
+            if (carpeta == null) {
+                cuentaALaIa("sin carpeta (no se eligió ninguna): el servidor para la IA sigue apagado");
+                return;
+            }
+        }
+        String linea = trasLaRespuesta(carpeta, si);
+        SALIDA.println("[ia] " + linea);
+    }
+
+    /** La pregunta: lo que podrá hacer la IA, y dónde. Por defecto, «No»: un Intro sin mirar no autoriza nada. */
+    private boolean autorizaLaPersona(Path carpeta) {
+        boolean amplia = carpeta != null && demasiadoAmplia(carpeta);
+        StringBuilder t = new StringBuilder("Una IA pide manejar el IDE: abrir, compilar y ejecutar programas, en el PC,"
+                + " en el micro\nsimulado y en las placas que se conecten; y abrir, guardar, subir y bajar ficheros ");
+        if (carpeta != null) {
+            t.append("dentro de\nesta carpeta y de sus subcarpetas:\n\n   ").append(carpeta).append('\n');
+            if (amplia) {
+                t.append("\nOjo: es una carpeta amplia, y la IA podrá tocar todo lo que hay ahí dentro.\n"
+                        + "(Mejor una carpeta sólo para el trabajo con la IA.)\n");
+            }
+        } else {
+            t.append("dentro de\nuna carpeta, que eliges tú a continuación.\n");
+        }
+        t.append("\nLo que haga sale en la consola, con «[ia]»; se apaga en el menú IA.\n\n¿La autorizas?");
+        Object[] opciones = { "Sí, que lo maneje", "No" };
+        toFront();
+        int r = JOptionPane.showOptionDialog(this, t.toString(), LA_IA_PIDE, JOptionPane.YES_NO_OPTION,
+                amplia ? JOptionPane.WARNING_MESSAGE : JOptionPane.QUESTION_MESSAGE, null, opciones, opciones[1]);
+        return r == 0;
+    }
+
+    /** Lo que sigue a la respuesta de la persona: con un sí, el servidor encendido (si el puerto está ocupado, su
+     *  aviso); y la línea que se le cuenta a la IA, sin el «[ia] ». Sin más diálogo que ese aviso (lo llaman también
+     *  las pruebas, con la ventana sin enseñar). */
+    String trasLaRespuesta(Path carpeta, boolean si) {
+        if (si) {
+            Resultado r = enciendeLaIa(carpeta);
+            if (r.ok) return "servidor para la IA en " + servidorIa.url() + " — su carpeta: " + servidorIa.carpeta();
+            comandos.muestra(r);
+            String linea = r.mensaje.replace("\n", " ");
+            appendConsola("[ia] " + linea + "\n");
+            return linea;
+        }
+        String linea = "no autorizado: el servidor para la IA sigue apagado";
+        appendConsola("[ia] una IA pidió manejar el IDE: " + linea + "\n");
+        return linea;
+    }
+
+    /** Lo que se le cuenta a la IA que abrió el IDE: en la consola y en la salida estándar. */
+    private void cuentaALaIa(String linea) {
+        appendConsola("[ia] " + linea + "\n");
+        SALIDA.println("[ia] " + linea);
+    }
+
+    /** La carpeta, absoluta y normalizada (una relativa, desde donde se abrió el IDE), si existe; null si no. */
+    static Path carpetaQueExiste(String ruta) {
+        try {
+            Path p = java.nio.file.Paths.get(ruta).toAbsolutePath().normalize();
+            return Files.isDirectory(p) ? p : null;
+        } catch (java.nio.file.InvalidPathException e) {
+            return null;
+        }
     }
 
     /** Cómo acabó el último programa ejecutado en el PC (su EXITED), para el resultado de «ejecutar». */
