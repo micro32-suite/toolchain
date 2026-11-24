@@ -1355,12 +1355,12 @@ public class VirtualMachine {
      *  cualquier longitud y un programa fallaba sólo al llegar a la placa. */
     static final int PATH_MAX_BYTES = 256;
     // ── V7/H4 (#479) — el estado de los pines y la validación contra la tabla del HOST (el perfil
-    // RP2350A: 30 pines, analógicos 26..29, sin colector abierto, PWM y pulsos en todos, buses 0 y 1).
+    // RP2350A: 30 pines, analógicos 26..29, PWM, pulsos y colector abierto (V9 H3 #882) en todos, buses 0 y 1).
     // Espejo de bpvm_gpio_reclamar / bpvm_gpio_instancia_ok: los MISMOS textos.
     private final int[] pinEstado = new int[160];   // 0 libre · 1 INPUT · 2 OUTPUT · 3 OD · 4 ANALOG
     private static int hostPinMask(int pin) {
         if (pin < 0 || pin >= 30) return 0;
-        int m = 1 | 4 | 8;
+        int m = 1 | 4 | 8 | 16;
         if (pin >= 26 && pin <= 29) m |= 2;
         return m;
     }
@@ -8285,16 +8285,15 @@ public class VirtualMachine {
                 break;
             }
             // ── V7/H4 — la tabla de capacidades del HOST = el perfil RP2350A, el mismo que la VM-C
-            // sin cintura (bpvm_machine.c): 30 GPIO digitales/PWM/PIO, ADC en 26..29, sin colector
-            // abierto, UART/I2C/SPI 0 y 1, 12 slices. Los dos PCs cuentan igual: paridad.
+            // sin cintura (bpvm_machine.c): 30 GPIO digitales/PWM/PIO y con colector abierto (V9 H3 #882),
+            // ADC en 26..29, UART/I2C/SPI 0 y 1, 12 slices. Los dos PCs cuentan igual: paridad.
             case CAPS_ARRAY: {
                 int kind = popTc(tc);
                 int[] out;
                 switch (kind) {
                     case 0: case 1: case 2: out = new int[] { 0, 1 }; break;
-                    case 3: case 5: case 6: out = new int[30]; for (int i = 0; i < 30; i++) out[i] = i; break;
+                    case 3: case 5: case 6: case 7: out = new int[30]; for (int i = 0; i < 30; i++) out[i] = i; break;
                     case 4: out = new int[] { 26, 27, 28, 29 }; break;
-                    case 7: out = new int[0]; break;
                     default: throwBpRuntimeError(tc, "Machine: clase de capacidad desconocida"); out = new int[0];
                 }
                 long h = heapNuevo(TYPE_ARRAY_I32, out.length, out.length * 4);   // V7/H7 #593
@@ -8336,9 +8335,7 @@ public class VirtualMachine {
             }
             case CAPS_PIN: {
                 int pin = popTc(tc);
-                int mask = (pin >= 0 && pin < 30) ? (1 | 4 | 8) : 0;
-                if (pin >= 26 && pin <= 29) mask |= 2;
-                pushTc(tc, mask);
+                pushTc(tc, hostPinMask(pin));
                 break;
             }
             // V7 (28-sep) — el diagnóstico del heap DESDE BP (Heap.bp): contadores de ESTA VM, sin reservar
