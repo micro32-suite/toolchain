@@ -263,6 +263,112 @@ class MensajesQueEnsenanTest {
         jcMiembro("public <T> void f(T x) { }", "@element{Tipo}");
     }
 
+    // ---------------------------------------------------------------- JC, más de un error (c)
+
+    private static java.util.List<JcLexer.Error> errores(String fuente, int tope) {
+        java.util.List<JcLexer.Error> es = new java.util.ArrayList<>();
+        Ast.ModuleNode m = JcParser.leer(fuente, es, tope);
+        assertEquals(es.isEmpty(), m != null);
+        return es;
+    }
+
+    private static void lineas(String fuente, int... esperadas) {
+        java.util.List<JcLexer.Error> es = errores(fuente, 10);
+        java.util.List<Integer> ls = new java.util.ArrayList<>();
+        for (JcLexer.Error e : es) ls.add(e.linea);
+        java.util.List<Integer> q = new java.util.ArrayList<>();
+        for (int l : esperadas) q.add(l);
+        assertEquals(q, ls, String.valueOf(es));
+    }
+
+    @Test @DisplayName("JC: un fichero escrito como en Java da sus errores de una vez, y cada uno en su sitio")
+    void jcVarios() {
+        lineas("module M\n{\n"
+                + "   class Item\n   {\n"                                      // 3, 4
+                + "      private int x;\n"
+                + "      public Item(int x) { this.x = x; }\n"                  // 6: sin function
+                + "      public int getX() { return x; }\n"                     // 7
+                + "   }\n"
+                + "   class P extends Item\n   {\n"                            // 9: extends
+                + "      @Override\n"                                           // 11
+                + "      public int getX() { return super.getX(); }\n"          // 12: sin function, y super
+                + "   }\n"
+                + "   function void Main()\n   {\n"                            // 14, 15
+                + "      for (Item it : lista)\n"                               // 16
+                + "      {\n"
+                + "         int y = x++;\n"                                     // 18
+                + "      }\n"
+                + "      if (a instanceof P) println(1);\n"                     // 20
+                + "      println(2);\n"
+                + "   }\n}\n", 6, 7, 9, 11, 12, 12, 16, 18, 20);
+    }
+
+    @Test @DisplayName("JC: un error no arrastra a lo que viene detrás")
+    void jcSinCascada() {
+        lineas("module M\n{\n   function void Main()\n   {\n"
+                + "      foo( ;\n"                                              // 5
+                + "      int a = 3;\n"
+                + "      if (a ==) { println(1); } else { println(2); }\n"      // 7
+                + "      do { a++; b +; } while (a < 3);\n"                     // 8
+                + "      Thread t = new Thread(() -> { f(); g(); });\n"         // 9
+                + "      println(a);\n"
+                + "   }\n"
+                + "   function int f(int) { return 1; }\n"                      // 12
+                + "   function int g() { return 2; }\n}\n", 5, 7, 8, 9, 12);
+    }
+
+    @Test @DisplayName("JC: diez como mucho; y una llave sin cerrar no añade otro")
+    void jcTope() {
+        StringBuilder sb = new StringBuilder("module M\n{\n   function void Main()\n   {\n");
+        for (int i = 0; i < 25; i++) sb.append("      x = ;\n");
+        assertEquals(10, errores(sb + "   }\n}\n", 10).size());
+        assertEquals(25, errores(sb + "   }\n}\n", Integer.MAX_VALUE).size());
+        lineas("module M\n{\n   function void Main()\n   {\n      x = ;\n", 5);
+        lineas("module M\n{\n   function void Main()\n   {\n      x = 1;\n", 6);   // sólo la llave: sí
+    }
+
+    @Test @DisplayName("JC: los errores léxicos, también de una vez (y entonces, sólo ésos)")
+    void jcLexicos() {
+        lineas("module M\n{\n   function void Main()\n   {\n      string s = $\"a\";\n      string t = s ?? \"b\";\n"
+                + "      x = ;\n   }\n}\n", 5, 6);
+    }
+
+    @Test @DisplayName("JC: quien traduce recibe el primero, como siempre")
+    void jcElPrimero() {
+        JcLexer.Error e = assertThrows(JcLexer.Error.class,
+                () -> JcParser.leer("module M\n{\n   void f() { x = ; }\n   void g() { }\n}\n"));
+        assertEquals(3, e.linea);
+        assertTrue(e.getMessage().contains("function void f(…)"));
+    }
+
+    @Test @DisplayName("De los errores de una compilación se escriben diez, y se dice que hay más; con 0, todos")
+    void diezComoMucho(@TempDir Path tmp) throws IOException {
+        StringBuilder cuerpo = new StringBuilder();
+        for (int i = 0; i < 14; i++) cuerpo.append("    noexiste").append(i).append("()\n");
+        String f = "module T\n  function Main()\n" + cuerpo + "  end Main\nend T\n";
+        String m = compila(tmp, ".bp", f);
+        assertEquals(10, m.split(": error semántico:", -1).length - 1, m);
+        assertTrue(m.contains("… y más: éstos son los 10 primeros"), m);
+        int antes = Main.MAX_ERRORES;
+        try {
+            Main.MAX_ERRORES = 0;
+            m = compila(tmp, ".bp", f);
+            assertEquals(14, m.split(": error semántico:", -1).length - 1, m);
+            assertFalse(m.contains("… y más"), m);
+        } finally {
+            Main.MAX_ERRORES = antes;
+        }
+    }
+
+    @Test @DisplayName("BP: una línea que empieza por un operador — va al final de la de arriba")
+    void siguelaLinea(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    print \"a\"\n      + \"b\"\n",
+                "una sentencia no empieza por '+': si es la línea de arriba que sigue, va al final de ella");
+        bp(tmp, "    var b: boolean := true\n      and false\n", "una sentencia no empieza por 'and'");
+        bp(tmp, "    print 3\n      - 1\n", "una sentencia no empieza por '-'");
+        bp(tmp, "    var n: integer\n    n\n      := 1\n", "una sentencia no empieza por ':='");
+    }
+
     // ---------------------------------------------------------------- JC, lo que ve el análisis
 
     @Test @DisplayName("JC: String, char, la consola y las cadenas")

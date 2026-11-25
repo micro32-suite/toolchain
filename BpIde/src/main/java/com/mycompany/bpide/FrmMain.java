@@ -1454,8 +1454,9 @@ public class FrmMain extends javax.swing.JFrame
             IdePrefs.pushRecent(prP.recentProjects, bpbuild.toAbsolutePath().toString(), IdePrefs.MAX_RECENT);
             prP.save();
             rebuildRecentProjectsMenu();
+            for (String w : proj.warnings) appendConsola("[ide] aviso del proyecto: " + w + "\n");   // V9 #897
             return Resultado.bien("proyecto abierto: " + bpbuild).con("proyecto", bpbuild.toString())
-                    .con("main", proj.main);
+                    .con("main", proj.main).con("avisos", proj.warnings);
         } catch (java.io.IOException ex) {
             return Resultado.aviso("Error", "Error cargando proyecto:\n" + ex.getMessage(), JOptionPane.ERROR_MESSAGE);
         }
@@ -3156,7 +3157,10 @@ public class FrmMain extends javax.swing.JFrame
      * (si se ejecuta; y entonces lo marca). null si se puede; si no, el resultado, con el diálogo de antes.
      */
     private Resultado antesDeCompilar(String que, Map<String, Object> p, boolean aLaPlaca, boolean ejecuta) {
-        if (editorArea.getText().isEmpty()) {
+        /* V9 #898 — con un proyecto abierto y nada en el editor, lo que se compila es el proyecto (su main): no hay
+         * pestaña que mirar ni que guardar. */
+        boolean soloElProyecto = currentProject != null && currentFile == null && editorArea.getText().isEmpty();
+        if (!soloElProyecto && editorArea.getText().isEmpty()) {
             return Resultado.aviso("Aviso", "Editor vacío. Carga o escribe un fichero primero.",
                     JOptionPane.INFORMATION_MESSAGE);
         }
@@ -3167,9 +3171,11 @@ public class FrmMain extends javax.swing.JFrame
                     "Conecta primero la placa desde el panel inferior\n(ventana inferior izquierda → Connect).",
                     JOptionPane.WARNING_MESSAGE);
         }
-        Resultado guardado = guardarYa(p);
-        if (!guardado.ok) return guardado;
-        if (currentFile == null) return Resultado.mal(que + ": la pestaña no tiene fichero");
+        if (!soloElProyecto) {
+            Resultado guardado = guardarYa(p);
+            if (!guardado.ok) return guardado;
+            if (currentFile == null) return Resultado.mal(que + ": la pestaña no tiene fichero");
+        }
         if (ejecuta && !marcaUnaEjecucion()) {   // V8 #822: un programa a la vez (compilar, sí)
             return Resultado.aviso("Un programa a la vez",
                     "Ya hay un programa en marcha.\nPáralo con Stop antes de ejecutar otro.",
@@ -3616,7 +3622,7 @@ public class FrmMain extends javax.swing.JFrame
                 // van el main y sus módulos. Un .mod suelto, como siempre.
                 final boolean packRun = currentProject != null
                         && "pack".equals(currentProject.out);
-                Path entry = outDir.resolve(moduleName + (packRun ? ".pack" : ".mod"));
+                Path entry = outDir.resolve(packRun ? currentProject.packName + ".pack" : moduleName + ".mod");
                 if (!Files.isRegularFile(entry)) {
                     publish("== no se encontró " + entry.getFileName() + " ==\n");
                     return null;
@@ -3800,7 +3806,7 @@ public class FrmMain extends javax.swing.JFrame
                 // orden de búsqueda §4), así que la app viaja cerrada.
                 final boolean packRun = currentProject != null
                         && "pack".equals(currentProject.out);
-                modPath = outDir.resolve(moduleName + (packRun ? ".pack" : ".mod"));
+                modPath = outDir.resolve(packRun ? currentProject.packName + ".pack" : moduleName + ".mod");
                 if (!Files.isRegularFile(modPath)) {
                     publish("== no se encontró " + modPath.getFileName() + " ==\n");
                     return false;

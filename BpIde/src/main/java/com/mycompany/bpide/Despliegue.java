@@ -274,7 +274,7 @@ public final class Despliegue {
             if (up) {
                 consola.accept("[Explorer] subido AOT " + mdnRemote + " (" + mdnFile.length() + " bytes)");
             }
-        } else {
+        } else if (modFile.getName().toLowerCase().endsWith(".mod")) {   // V9 #899: de un .pack, el nombre era el suyo, y se borraba
             /* [25-ago-2026] La app ya NO trae `.mdn` suelto (el nativo va
              * DENTRO del `.mod` desde N1.4, y AotBuild dejó de escribirlo).
              * Pero el de la TANDA ANTERIOR sigue en el device, y no es

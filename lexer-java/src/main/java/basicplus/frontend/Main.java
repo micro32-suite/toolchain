@@ -51,6 +51,10 @@ public final class Main {
      *  Eduardo: «no se puede mantener la mezcla de versiones»); `--formato=8` sigue existiendo
      *  como salida de emergencia hasta cerrar V7 (la foto «antes» de compat/mezcla.py). */
     public static int FORMATO = 9;
+    /** V9 #860 (c) — los errores que se escriben de una compilación, los primeros; 0, todos ({@code --max-errores=N}).
+     *  Eduardo, 25-nov: «Siempre es mejor que de una lista de errores que los errores 1 a 1. Pero una lista corta de no
+     *  mas de 10 errores.» */
+    public static int MAX_ERRORES = 10;
     /** V7/H2 (#523, V11, 17-sep) — `--stdlibDir=DIR`: la stdlib contra la que se compila, dicha
      *  desde la línea de órdenes (como el `--stdlibDir` de la miVM). Manda sobre el `stdlibDir`
      *  del BpVM.cfg autodescubierto (#467: la stdlib PRIMERO, y ésta es «la más específica»).
@@ -109,6 +113,8 @@ public final class Main {
         boolean showTokens = false;
         boolean showAst    = false;
         boolean verbose    = true;                  // imprimir progreso humano
+        int erroresDichos  = 0;                     // V9 #860 (c): los escritos, hasta MAX_ERRORES
+        boolean hayMasDicho = false;
 
         /** En el call stack actual. Detección de ciclos. */
         final Set<Path> compilingFull      = new LinkedHashSet<>();
@@ -373,7 +379,17 @@ public final class Main {
          * y cuáles publica lo sabe sólo quien la escribe (idea de Eduardo). */
         List<Path> raices = new ArrayList<>();
         if (!proj.sources.isEmpty()) {
-            for (String s : proj.sources) raices.add(Paths.get(s));
+            for (String s : proj.sources) {
+                Path p = Paths.get(s);
+                if (!Files.isRegularFile(p)) {   // V9 #897: el DAO por generar (o uno que se ha quitado tras cargarlo)
+                    String de = BpBuild.entidadesDelDao(p);
+                    System.err.println("error proyecto: 'sources' nombra " + p.getFileName() + ", que no está" + (de == null
+                            ? " (" + p + ")" : ": lo genera DAO build, de las entidades de " + de
+                            + " (en el IDE, o con bp frontend --project <el proyecto>.bpbuild --dao)"));
+                    return false;
+                }
+                raices.add(p);
+            }
             System.out.println("sources: " + raices.size() + " modulo(s) — "
                     + proj.sources.stream().map(s -> Paths.get(s).getFileName().toString())
                         .collect(java.util.stream.Collectors.joining(", ")));
@@ -531,6 +547,7 @@ public final class Main {
         out.println("  --prune-bpi                borra los .bpi del build al acabar");
         out.println("  --dao                      con --project: genera los DAOs de sus entidades, sin compilar");
         out.println("  --quiet                    sólo los errores y avisos; si compila, nada");
+        out.println("  --max-errores=N            los errores que se escriben, los primeros (por defecto, " + MAX_ERRORES + "; 0, todos)");
         out.println("Sin --compile (sólo analiza): --tokens (los tokens), --ast (el árbol)");
         out.println("JC, BasicPlus con llaves (a la salida estándar; de un fichero, o de una carpeta al comprobar):");
         out.println("  --escribir-jc              BP -> JC");
@@ -610,6 +627,10 @@ public final class Main {
             else if (a.startsWith("--stdlibDir=")) {   // V7/H2 (#523, V11): la stdlib dicha a mano
                 STDLIB_DIR = a.substring("--stdlibDir=".length());
                 if (!Files.isDirectory(Paths.get(STDLIB_DIR))) { System.err.println("--stdlibDir: no es un directorio: " + STDLIB_DIR); System.exit(1); return; }
+            }
+            else if (a.startsWith("--max-errores=")) {   // V9 #860 (c)
+                try { MAX_ERRORES = Integer.parseInt(a.substring("--max-errores=".length())); }
+                catch (NumberFormatException ex) { System.err.println("--max-errores necesita un entero (0, todos): " + a); System.exit(1); return; }
             }
             else if (a.startsWith("--formato=")) {   // V7/H2 (#523): 8 | 9
                 String f = a.substring("--formato=".length());
@@ -751,7 +772,7 @@ public final class Main {
 
         SemanticAnalyzer analyzer = new SemanticAnalyzer();
         SemanticInfo info = analyzer.analyze(parsed.module);
-        printSemantics(info, parsed.module, p, true);
+        printSemantics(info, parsed.module, p, true, ctx);
         ctx.totalErrors += countSemErrors(info);
     }
 
@@ -898,7 +919,7 @@ public final class Main {
                         }
                         loadImportsForAnalyzer(parsed.module, src, ctx, recAnalyzer, depth + 1);
                         SemanticInfo recInfo = recAnalyzer.analyze(parsed.module);
-                        printSemantics(recInfo, parsed.module, src, depth == 0);   // V9 #856: los de todos los módulos
+                        printSemantics(recInfo, parsed.module, src, depth == 0, ctx);   // V9 #856: los de todos los módulos
                         ctx.totalErrors += countSemErrors(recInfo);
                     } catch (RuntimeException ignored) {
                         // AST demasiado roto para un análisis fiable: bastan
@@ -962,7 +983,7 @@ public final class Main {
             SemanticInfo info = analyzer.analyze(module);
             /* V9 #856 — los diagnósticos de TODOS los módulos, cada uno con su fichero: los de uno importado no salían
              * (sólo «compilación abortada por errores semánticos en Lib.bp»). El resumen, sólo del raíz. */
-            printSemantics(info, module, src, depth == 0);
+            printSemantics(info, module, src, depth == 0, ctx);
             if (depth == 0) {
                 /* V5/H8 — ¿es EJECUTABLE lo que estamos construyendo? Lo dice
                  * tener `main`, no un campo del proyecto. Una librería no tiene
@@ -1214,7 +1235,7 @@ public final class Main {
             // No abortamos ante errores: en modo interface puede haber refs no
             // resueltas (a tipos importados). Sólo contamos diagnósticos para
             // información. La extracción saltará firmas no exportables.
-            if (depth == 0) printSemantics(info, module, src, true);   // en modo interfaz, informativos: sólo los del raíz
+            if (depth == 0) printSemantics(info, module, src, true, ctx);   // en modo interfaz, informativos: sólo los del raíz
 
             if (info.module == null) {
                 indent(depth); System.err.println("interface sin ModuleSymbol en " + srcAbs.getFileName());
@@ -3922,7 +3943,7 @@ public final class Main {
     // LEX + PARSE + PRINTS
     // ============================================================
     /** Lo que sale de leer un fuente: el árbol y sus errores. V8 #698: de un `.bp`, por el Lexer y el Parser de BP;
-     *  de un `.jc`, por JcParser, al mismo árbol (y como se para en el primer error, uno como mucho). */
+     *  de un `.jc`, por JcParser, al mismo árbol. */
     private static final class Parsed {
         Ast.ModuleNode module;
         final List<LexerError> lexErrors = new ArrayList<>();
@@ -3937,7 +3958,19 @@ public final class Main {
         return f != null && f.toString().endsWith(".jc");
     }
 
-    /** JC: el árbol, o el primer error en la lista que le toca (el escáner da los léxicos; el parser, los demás). */
+    /** V9 #860 (c) — escribe un error; de los de una compilación, los {@link #MAX_ERRORES} primeros, y una vez que hay
+     *  más. Los avisos no cuentan. */
+    private static void diceError(Ctx ctx, String texto) {
+        if (MAX_ERRORES <= 0 || ctx.erroresDichos < MAX_ERRORES) {
+            ctx.erroresDichos++;
+            diag().println(texto);
+        } else if (!ctx.hayMasDicho) {
+            ctx.hayMasDicho = true;
+            diag().println("… y más: éstos son los " + MAX_ERRORES + " primeros (--max-errores=0, todos)");
+        }
+    }
+
+    /** JC: el árbol, o los errores en la lista que les toca (el escáner da los léxicos; el parser, los demás). */
     private static void leerJc(String source, Ctx ctx, boolean isRoot, Parsed r) {
         try {
             if (isRoot && ctx.showTokens) {
@@ -3946,11 +3979,17 @@ public final class Main {
                 for (JcLexer.Tok t : toks) System.out.printf("%5d:%-3d  %-9s  %s%n", t.linea, t.columna, t.tipo, t);
                 System.out.println();
             }
-            r.module = JcParser.leer(source);
+            List<JcLexer.Error> es = new ArrayList<>();   // V9 #860 (c): uno más que el tope, para decir que hay más
+            r.module = JcParser.leer(source, es, MAX_ERRORES <= 0 ? Integer.MAX_VALUE : MAX_ERRORES + 1);
+            for (JcLexer.Error e : es) apuntaDeJc(r, e);
         } catch (JcLexer.Error e) {
-            if (e.lexico) r.lexErrors.add(new LexerError(e.mensaje, e.linea, e.columna));
-            else          r.parseErrors.add(new ParserError(e.mensaje, e.linea, e.columna));
+            apuntaDeJc(r, e);
         }
+    }
+
+    private static void apuntaDeJc(Parsed r, JcLexer.Error e) {
+        if (e.lexico) r.lexErrors.add(new LexerError(e.mensaje, e.linea, e.columna));
+        else          r.parseErrors.add(new ParserError(e.mensaje, e.linea, e.columna));
     }
 
     private static Parsed parseAndPrint(Path src, Ctx ctx, boolean isRoot) {
@@ -3986,7 +4025,7 @@ public final class Main {
         }
         if (!r.lexErrors.isEmpty()) {
             System.out.printf("-- Errores léxicos en %s (%d) --%n", src.getFileName(), r.lexErrors.size());
-            for (LexerError e : r.lexErrors) diag().println(conFichero(src, e.line, e.column, e.toString()));   // V9 #856
+            for (LexerError e : r.lexErrors) diceError(ctx, conFichero(src, e.line, e.column, e.toString()));   // V9 #856
         }
 
         if (parser != null) {
@@ -4004,7 +4043,7 @@ public final class Main {
         }
         if (!r.parseErrors.isEmpty()) {
             System.out.printf("-- Errores sintácticos en %s (%d) --%n", src.getFileName(), r.parseErrors.size());
-            for (ParserError e : r.parseErrors) diag().println(conFichero(src, e.line, e.column, e.toString()));   // V9 #856
+            for (ParserError e : r.parseErrors) diceError(ctx, conFichero(src, e.line, e.column, e.toString()));   // V9 #856
         }
         return r;
     }
@@ -4016,7 +4055,7 @@ public final class Main {
      * errores, y con ellos sus avisos); si compila, no: sus avisos no se veían, y el de «no define main» lo da toda
      * librería (sólo le importa al raíz): con él, cada compilación correcta lo repetiría, y --quiet nunca callaría.
      */
-    private static void printSemantics(SemanticInfo info, Ast.ModuleNode module, Path src, boolean conResumen) {
+    private static void printSemantics(SemanticInfo info, Ast.ModuleNode module, Path src, boolean conResumen, Ctx ctx) {
         if (info == null) return;
         int errs = 0, warns = 0;
         for (SemanticDiagnostic d : info.diagnostics) {
@@ -4026,7 +4065,11 @@ public final class Main {
             if (conResumen) System.out.println("-- Sin diagnósticos semánticos --");
         } else if (conResumen || errs > 0) {
             System.out.printf("-- Diagnósticos semánticos (%d errores, %d avisos) --%n", errs, warns);
-            for (SemanticDiagnostic d : info.diagnostics) diag().println(conFichero(src, d.line, d.column, d.toString()));
+            for (SemanticDiagnostic d : info.diagnostics) {
+                String texto = conFichero(src, d.line, d.column, d.toString());
+                if (d.kind == SemanticDiagnostic.Kind.ERROR) diceError(ctx, texto);
+                else diag().println(texto);
+            }
         }
         if (conResumen && info.module != null) {
             Symbol.ModuleSymbol m = info.module;

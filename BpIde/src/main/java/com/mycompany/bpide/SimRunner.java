@@ -110,6 +110,20 @@ public final class SimRunner {
         return out;
     }
 
+    /** V9 #896 — el pack sin los motores de las placas, como se graba en una (PacksPlaca): el simulado lleva los suyos en
+     *  el ejecutable, y SQLite.pack y Gui.pack, enteros, no caben en su zona (1 MB): sin el suyo no hay base de datos.
+     *  Se deja en la carpeta del simulado (packs-nuevos); si no se puede, el de la instalación. */
+    private Path sinMotores(Path pack, Path dataDir) {
+        try {
+            byte[] podado = basicplus.frontend.PackBurn.podar(Files.readAllBytes(pack), null).bytes;
+            Path d = Files.createDirectories(dataDir.resolve("packs-nuevos"));
+            return Files.write(d.resolve(pack.getFileName().toString()), podado);
+        } catch (IOException | basicplus.frontend.PackBurn.BurnException ex) {
+            say("[sim] " + pack.getFileName() + ", sin podar: " + ex.getMessage());
+            return pack;
+        }
+    }
+
     /** Lo que se vacía de la placa simulada, en su carpeta de datos: su FS y su zona de packs. Su flash
      *  ({@code micro.flash}, el ENV: las particiones y lo que se le haya puesto) se queda. */
     static final String[] VACIABLE = { "micro.fs", "micro.packs" };
@@ -182,7 +196,7 @@ public final class SimRunner {
         int nPacks = 0;
         if (virgen) {
             for (Path p : packsToBurn(prefs)) {
-                cmd.add("--pack=" + p);
+                cmd.add("--pack=" + sinMotores(p, dataDir));
                 nPacks++;
             }
             if (nPacks == 0)

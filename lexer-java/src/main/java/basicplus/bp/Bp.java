@@ -54,6 +54,7 @@ public final class Bp {
         }
         String orden = args[0];
         List<String> resto = new ArrayList<>(Arrays.asList(args).subList(1, args.length));
+        if (("build".equals(orden) || "run".equals(orden) || "test".equals(orden)) && !maxErrores(resto)) return 1;
         switch (orden) {
             case "help": case "-h": case "--help":
                 ayuda(System.out);
@@ -73,11 +74,28 @@ public final class Bp {
         }
     }
 
+    /** V9 #860 (c) — {@code --max-errores=N}: los errores que se escriben (10; 0, todos). false si está mal escrito. */
+    private static boolean maxErrores(List<String> args) {
+        for (java.util.Iterator<String> it = args.iterator(); it.hasNext(); ) {
+            String a = it.next();
+            if (!a.startsWith("--max-errores=")) continue;
+            try {
+                Main.MAX_ERRORES = Integer.parseInt(a.substring("--max-errores=".length()));
+            } catch (NumberFormatException ex) {
+                System.err.println("bp: --max-errores necesita un entero (0, todos): " + a);
+                return false;
+            }
+            it.remove();
+        }
+        return true;
+    }
+
     static void ayuda(PrintStream out) {
         out.println("bp: las herramientas de BasicPlus, por línea de órdenes");
         out.println();
         out.println("  bp build <fuente.bp | fuente.jc | proyecto.bpbuild> [--out <carpeta>]");
-        out.println("        compila: el .mod, en <la carpeta del fuente>/out (o en el outDir del proyecto)");
+        out.println("        compila: el .mod, en <la carpeta del fuente>/out (o en el outDir del proyecto). De los");
+        out.println("        errores, los 10 primeros; con --max-errores=0 (aquí, en run y en test), todos");
         out.println("  bp run [--c] [opciones de la VM] <fuente | proyecto.bpbuild | programa.mod> [argumento]");
         out.println("        compila si hace falta, y ejecuta con la VM Java; con --c, con la VM-C");
         out.println("        (sale con el código del programa; si no compila, con 2 y los errores)");
@@ -164,7 +182,7 @@ public final class Bp {
         } finally {
             vuelve.run();
         }
-        if (c.codigo == 0 && c.mod != null) System.out.println("compilado: " + rutaParaMostrar(c.mod));
+        if (c.codigo == 0 && c.queda != null) System.out.println("compilado: " + rutaParaMostrar(c.queda));
         return c.codigo;
     }
 
@@ -175,11 +193,13 @@ public final class Bp {
         return abs.startsWith(aqui) && !abs.equals(aqui) ? aqui.relativize(abs).toString() : abs.toString();
     }
 
-    /** Lo que deja una compilación: su código (0, 1 o 2) y el .mod que hay que ejecutar. */
+    /** Lo que deja una compilación: su código (0, 1 o 2), el .mod que hay que ejecutar, y lo que se dice que queda (de un
+     *  proyecto que sale en pack, su .pack; de uno sin main, una librería, la carpeta). */
     static final class Compilado {
         final int codigo;
-        final Path mod;
-        Compilado(int codigo, Path mod) { this.codigo = codigo; this.mod = mod; }
+        final Path mod, queda;
+        Compilado(int codigo, Path mod) { this(codigo, mod, mod); }
+        Compilado(int codigo, Path mod, Path queda) { this.codigo = codigo; this.mod = mod; this.queda = queda; }
     }
 
     /** Compila un fuente o un proyecto, con la salida del compilador tal cual. */
@@ -194,8 +214,11 @@ public final class Bp {
             if (nombre.endsWith(".bpbuild")) {
                 if (out != null) { System.err.println("bp: un proyecto deja lo suyo en su outDir; --out no vale"); }
                 BpBuild proj = BpBuild.load(abs);
+                for (String w : proj.warnings) Main.diag().println("aviso proyecto: " + w);   // V9 #897
                 boolean ok = Main.buildProject(proj, "mivm", /*pruneBpi*/ true);
-                return new Compilado(ok ? 0 : 2, Paths.get(proj.outDir).resolve(proj.main + ".mod"));
+                Path dir = Paths.get(proj.outDir), mod = dir.resolve(proj.main + ".mod");
+                return new Compilado(ok ? 0 : 2, mod, "pack".equals(proj.out) ? dir.resolve(proj.packName + ".pack")
+                                                      : Files.isRegularFile(mod) ? mod : dir);
             }
             if (nombre.endsWith(".bp") || nombre.endsWith(".jc")) {
                 Path dir = (out != null) ? Paths.get(out).toAbsolutePath().normalize() : abs.getParent().resolve("out");
@@ -300,6 +323,12 @@ public final class Bp {
         VmConfig instalacion = cfgDeLaInstalacion();
         Path fichero = Paths.get(sueltos.get(0));
         String argumento = sueltos.size() > 1 ? sueltos.get(1) : null;
+        /* El bash de Git cambia un argumento que empieza por «/» por una ruta de Windows: «/data/x.db» llega como
+         * «C:/Program Files/Git/data/x.db», y el programa no encuentra nada (visto el 25-nov). Se dice. */
+        if (argumento != null && argumento.matches("(?i)[A-Z]:/.*/Git/.*"))
+            System.err.println("bp run: el argumento ha llegado como «" + argumento + "»: lo ha cambiado el bash de Git;"
+                    + " si querías una ruta que empieza por «/», escríbela con dos (//data/x.db), o con"
+                    + " MSYS_NO_PATHCONV=1 delante de bp");
         String nombre = fichero.getFileName().toString().toLowerCase(Locale.ROOT);
         Path mod;
         if (nombre.endsWith(".mod") || nombre.endsWith(".pack")) {
@@ -345,7 +374,7 @@ public final class Bp {
             if (proyecto != null) {
                 try {   // un proyecto que sale en pack: a la placa va el .pack, cerrado (como en el IDE, #310)
                     BpBuild proj = BpBuild.load(proyecto);
-                    Path pack = Paths.get(proj.outDir).resolve(proj.main + ".pack");
+                    Path pack = Paths.get(proj.outDir).resolve(proj.packName + ".pack");
                     if ("pack".equals(proj.out) && Files.isRegularFile(pack)) mod = pack;
                 } catch (IOException ignored) { /* el .mod, como hasta aquí */ }
             }

@@ -20,8 +20,12 @@
 //     como los grupos de BP (punto 5).
 // Lo que en Java o en C# se escribe de otra manera se reconoce, y el error dice
 // cómo es en JC (V9 #860: «en JC es 'is'», y no «se esperaba ')'»).
-// El primer error para el parser: no hay recuperación. El compilador lee un
-// `.jc` con este parser y sigue con el árbol como si viniera de un `.bp`.
+// El compilador lee un `.jc` con este parser y sigue con el árbol como si
+// viniera de un `.bp`. Al compilar, los errores se apuntan y se sigue leyendo
+// por la sentencia o la declaración siguiente —o como si estuviera bien, si se
+// sabe qué se quiso decir—, hasta diez (V9 #860 c; Eduardo: «Siempre es mejor
+// que de una lista de errores que los errores 1 a 1. Pero una lista corta de
+// no mas de 10 errores»). A quien traduce le basta el primero.
 // ============================================================
 package basicplus.frontend;
 
@@ -61,11 +65,84 @@ final class JcParser {
     private String packNativoMarca = null;
     private int packNativoVersion = 0;
 
-    private JcParser(List<Tok> toks) { this.toks = toks; }
+    /** V9 #860 (c) — donde se apuntan los errores, hasta {@link #tope}; null: el primero se lanza. */
+    private final List<JcLexer.Error> errores;
+    private final int tope;
+
+    private JcParser(List<Tok> toks, List<JcLexer.Error> errores, int tope) {
+        this.toks = toks;
+        this.errores = errores;
+        this.tope = tope;
+    }
 
     /** El árbol de un fuente JC. Lanza {@link JcLexer.Error} con la línea y la columna del primer error. */
     static ModuleNode leer(String fuente) {
-        return new JcParser(JcLexer.leer(fuente)).modulo();
+        return new JcParser(JcLexer.leer(fuente), null, 0).modulo();
+    }
+
+    /** V9 #860 (c) — el árbol, o null y, en `errores`, los que hay, como mucho `tope`. */
+    static ModuleNode leer(String fuente, List<JcLexer.Error> errores, int tope) {
+        List<Tok> toks = JcLexer.leer(fuente, errores, tope);
+        if (!errores.isEmpty()) return null;   // con un error léxico, los de sintaxis no serían de fiar
+        JcParser p = new JcParser(toks, errores, tope);
+        ModuleNode m = null;
+        try {
+            m = p.modulo();
+        } catch (Basta b) {
+            // el tope, o el final del fichero con errores ya dichos
+        } catch (JcLexer.Error e) {
+            errores.add(e);                    // fuera de una sentencia y de una declaración: no se sigue
+        }
+        return errores.isEmpty() ? m : null;
+    }
+
+    /** No se lee más: los errores que hay son los que se dicen. */
+    private static final class Basta extends RuntimeException {
+        Basta() { super(null, null, false, false); }
+    }
+
+    /** Apunta un error y deja seguir; si no se apuntan, lo lanza. */
+    private void apunta(JcLexer.Error e) {
+        if (errores == null) throw e;
+        JcLexer.Error u = errores.isEmpty() ? null : errores.get(errores.size() - 1);
+        if (u == null || u.linea != e.linea || u.columna != e.columna) errores.add(e);
+        if (errores.size() >= tope) throw new Basta();
+    }
+
+    /** El fichero se acaba sin una llave: con errores ya dichos, será por ellos. */
+    private RuntimeException finInesperado(String msg) {
+        return errores != null && !errores.isEmpty() ? new Basta() : error(msg);
+    }
+
+    /** Salta lo que empezó en `desde` —una sentencia o una declaración—: hasta su `;` o la `}` del bloque que abrió. La
+     *  `}` de quien la lleva dentro no se toca. */
+    private void saltaDesde(int desde) {
+        boolean esFor = toks.get(desde).es("for"), esDo = toks.get(desde).es("do");
+        int hondo = 0, par = 0;
+        pos = desde;
+        while (!esFin()) {
+            if (es("{")) {
+                hondo++;
+            } else if (es("}")) {
+                if (hondo == 0) break;
+                if (--hondo == 0) {
+                    avanza();
+                    boolean sigue = es("else") || es("catch") || es("finally") || es(";") || es("=") || es(",") || es(")")
+                            || esDo && es("while");
+                    if (!sigue) break;
+                    continue;
+                }
+            } else if (hondo == 0 && es("(")) {
+                par++;
+            } else if (hondo == 0 && es(")")) {
+                par--;
+            } else if (hondo == 0 && es(";") && (par <= 0 || !esFor)) {
+                avanza();
+                break;
+            }
+            avanza();
+        }
+        if (pos == desde && !esFin()) avanza();   // siempre se adelanta
     }
 
     // ============================================================
@@ -144,11 +221,27 @@ final class JcParser {
         enInterfaz = isInterface;
         espera("{", "'{' tras la cabecera del módulo");
         List<ImportNode> imports = new ArrayList<>();
-        while (es("import")) imports.add(importa());
+        while (es("import")) {
+            int desde = pos;
+            try {
+                imports.add(importa());
+            } catch (JcLexer.Error e) {
+                apunta(e);
+                saltaDesde(desde);
+            }
+        }
         List<ITopLevelDecl> defs = new ArrayList<>();
         while (!es("}")) {
-            if (esFin()) throw error("falta la '}' que cierra el módulo");
-            declaracion(defs);
+            if (esFin()) throw finInesperado("falta la '}' que cierra el módulo");
+            int desde = pos;
+            try {
+                declaracion(defs);
+            } catch (JcLexer.Error e) {
+                apunta(e);
+                clase = null;
+                enInterfazDeClase = false;
+                saltaDesde(desde);
+            }
         }
         espera("}");
         if (!esFin()) throw error("sobra " + actual() + " tras la '}' que cierra el módulo");
@@ -252,9 +345,11 @@ final class JcParser {
                 break;
             }
         }
-        if (clase == null && (isProtected || isStatic))
-            throw error((isStatic ? "'static'" : "'protected'") + " sólo va en un miembro de una clase"
-                    + (isStatic ? "; una función del módulo no lo lleva: function void f()" : ""));
+        if (clase == null && (isProtected || isStatic)) {
+            apunta(error((isStatic ? "'static'" : "'protected'") + " sólo va en un miembro de una clase"
+                    + (isStatic ? "; una función del módulo no lo lleva: function void f()" : "")));
+            isStatic = false;
+        }
         deOtroLenguaje();
         if (es("class")) {
             if (clase != null) throw error("una clase dentro de otra: BP no las tiene");
@@ -288,7 +383,7 @@ final class JcParser {
             return;
         }
         if (es("function")) {
-            defs.add(funcion(isPublic, isPrivate, isFinal, isNative, deClase));
+            defs.add(funcion(isPublic, isPrivate, isFinal, isNative, deClase, false));
             return;
         }
         if (es("enum")) {
@@ -296,19 +391,32 @@ final class JcParser {
             return;
         }
         // Lo demás empieza por un tipo: una propiedad (si sigue una llave) o variables.
-        if (es("void") && mira(1).tipo == Tipo.NOMBRE) throw error(sinFunction("void " + mira(1).texto));
-        if (clase != null && esNombre(clase) && mira(1).es("("))
-            throw error("un constructor lleva 'function' delante: function " + clase + "(…)");
+        if (es("void") && mira(1).tipo == Tipo.NOMBRE) {
+            apunta(error(sinFunction("void " + mira(1).texto)));
+            defs.add(funcion(isPublic, isPrivate, isFinal, isNative, deClase, true));
+            return;
+        }
+        if (clase != null && esNombre(clase) && mira(1).es("(")) {
+            apunta(error("un constructor lleva 'function' delante: function " + clase + "(…)"));
+            defs.add(funcion(isPublic, isPrivate, isFinal, isNative, deClase, true));
+            return;
+        }
+        int p0 = pos;
         Tok t0 = actual();
         TypeRef tipo = tipo();
         Tok n = actual();
         String nombre = nombre("el nombre de la variable o de la propiedad");
-        if (es("(")) throw errorEn(t0, sinFunction(escrito(t0, n) + " " + nombre));
+        if (es("(")) {
+            apunta(errorEn(t0, sinFunction(escrito(t0, n) + " " + nombre)));
+            pos = p0;
+            defs.add(funcion(isPublic, isPrivate, isFinal, isNative, deClase, true));
+            return;
+        }
         if (es("{")) {
             defs.add(propiedad(isPublic, isPrivate, isFinal, isSync, isOwner, tipo, nombre, n, deClase));
             return;
         }
-        if (isFinal) throw errorEn(t0, sinFinal("const " + escrito(t0, n) + " " + nombre + " = …"));
+        if (isFinal) apunta(errorEn(t0, sinFinal("const " + escrito(t0, n) + " " + nombre + " = …")));
         if (isSync) throw error("'sync' sólo se aplica a una propiedad");
         for (VarDecl v : variables(isPublic, isOwner, tipo, n, nombre, deClase)) {
             v.isPrivate = isPrivate;
@@ -327,13 +435,19 @@ final class JcParser {
             throw error("en JC un módulo se nombra con module, y se importa con import: import Collections;");
         if (!esNombre() || !(mira(1).tipo == Tipo.RESERVADA || mira(1).tipo == Tipo.NOMBRE && mira(2).tipo == Tipo.NOMBRE))
             return;   // lo de abajo, sólo como modificador: con un tipo y un nombre detrás
-        if (esNombre("abstract"))
-            throw error("JC no tiene 'abstract'; para que una clase tenga que escribir un método, una interfaz");
-        if (esNombre("override") || esNombre("virtual"))
-            throw error("en JC no va '" + actual().texto + "': todo método es virtual, y se redefine escribiéndolo con su misma"
-                    + " firma (con @override{} delante, si se quiere)");
-        if (esNombre("synchronized"))
-            throw error("JC no tiene 'synchronized': un Mutex, con lock() y unlock(), o una propiedad sync");
+        if (esNombre("abstract")) {
+            JcLexer.Error e = error("JC no tiene 'abstract'; para que una clase tenga que escribir un método, una interfaz");
+            if (!mira(1).es("class")) throw e;   // el método no lleva cuerpo: se salta entero
+            apunta(e);
+            avanza();
+        } else if (esNombre("override") || esNombre("virtual")) {
+            apunta(error("en JC no va '" + actual().texto + "': todo método es virtual, y se redefine escribiéndolo con su misma"
+                    + " firma (con @override{} delante, si se quiere)"));
+            avanza();
+        } else if (esNombre("synchronized")) {
+            apunta(error("JC no tiene 'synchronized': un Mutex, con lock() y unlock(), o una propiedad sync"));
+            avanza();
+        }
     }
 
     private String sinFunction(String cabecera) {
@@ -393,8 +507,8 @@ final class JcParser {
         return "en JC la clase base y las interfaces van tras ':', como en C#: " + cabecera + sb;
     }
 
-    /** `for (T x : c)`, el de Java, es `foreach (var x in c)`. */
-    private void recorridoDeJava() {
+    /** `for (T x : c)`, el de Java, es `foreach (var x in c)`: se dice, y se lee como él. null si no lo es. */
+    private ForStmt recorridoDeJava(Tok del, String nombreDelBucle) {
         int aqui = pos;
         Tok t = actual();
         acepta("final");
@@ -403,8 +517,14 @@ final class JcParser {
         boolean deJava = empieza && esNombre() && mira(1).es(":");
         String x = deJava ? actual().texto : "x";
         String c = deJava && mira(2).tipo == Tipo.NOMBRE && mira(3).es(")") ? mira(2).texto : "…";
-        pos = aqui;
-        if (deJava) throw errorEn(t, "en JC lo que se recorre va con foreach: foreach (var " + x + " in " + c + ")");
+        if (!deJava) {
+            pos = aqui;
+            return null;
+        }
+        apunta(errorEn(t, "en JC lo que se recorre va con foreach: foreach (var " + x + " in " + c + ")"));
+        avanza();      // el nombre
+        espera(":");
+        return recorrido(del, nombreDelBucle, x);
     }
 
     /** Una lambda, `() -> …`, `x => …`, `(a, b) => …`. */
@@ -423,13 +543,23 @@ final class JcParser {
         String name = nombre("el nombre de la clase");
         String base = null;
         List<String> interfaces = new ArrayList<>();
-        if (es("extends") || es("implements")) throw error(conDosPuntos("class " + name));
-        if (es("<"))
-            throw error("JC no tiene los genéricos propios: el tipo de lo que guarda la clase va delante, @element{Tipo}");
-        if (acepta(":")) {
+        if (es("<")) {
+            apunta(error("JC no tiene los genéricos propios: el tipo de lo que guarda la clase va delante, @element{Tipo}"));
+            while (!es("{") && !es(":") && !es("extends") && !es("implements") && !esFin()) avanza();
+        }
+        boolean deJava = es("extends") || es("implements");
+        if (deJava) apunta(error(conDosPuntos("class " + name)));
+        if (acepta(":") || deJava && avanza() != null) {
             base = nombreDeTipo("la clase base tras ':'");
-            while (acepta(",")) interfaces.add(nombreDeTipo("una interfaz tras ','"));
-            if (es("implements")) throw error("las interfaces van en la misma lista que la clase base, tras una ','");
+            while (true) {
+                if (es("implements")) {
+                    if (!deJava) apunta(error("las interfaces van en la misma lista que la clase base, tras una ','"));
+                    avanza();
+                } else if (!acepta(",")) {
+                    break;
+                }
+                interfaces.add(nombreDeTipo("una interfaz tras ','"));
+            }
         }
         espera("{", "'{' tras la cabecera de la clase");
         List<ITopLevelDecl> members = miembros(name, "la clase");
@@ -446,8 +576,9 @@ final class JcParser {
         Tok tok = espera("interface");
         String name = nombre("el nombre de la interfaz");
         List<String> padres = new ArrayList<>();
-        if (es("extends") || es("implements")) throw error(conDosPuntos("interface " + name));
-        if (acepta(":")) {
+        boolean deJava = es("extends") || es("implements");
+        if (deJava) apunta(error(conDosPuntos("interface " + name)));
+        if (acepta(":") || deJava && avanza() != null) {
             padres.add(nombreDeTipo("una interfaz tras ':'"));
             while (acepta(",")) padres.add(nombreDeTipo("una interfaz tras ','"));
         }
@@ -481,8 +612,15 @@ final class JcParser {
         List<ITopLevelDecl> members = new ArrayList<>();
         clase = name;
         while (!es("}")) {
-            if (esFin()) throw error("falta la '}' que cierra " + que + " " + name);
-            declaracion(members);
+            if (esFin()) throw finInesperado("falta la '}' que cierra " + que + " " + name);
+            int desde = pos;
+            try {
+                declaracion(members);
+            } catch (JcLexer.Error e) {
+                apunta(e);
+                clase = name;
+                saltaDesde(desde);
+            }
         }
         clase = null;
         espera("}");
@@ -511,9 +649,11 @@ final class JcParser {
     private Annotation anotacion() {
         Tok at = espera("@");
         String nombre = nombre("el nombre de la anotación tras '@'");
-        if ("Override".equals(nombre) && !es("{"))
-            throw errorEn(at, "en JC no hace falta: un método redefine al de la base con su misma firma; si se quiere marcar,"
-                    + " @override{}");
+        if ("Override".equals(nombre) && !es("{")) {
+            apunta(errorEn(at, "en JC no hace falta: un método redefine al de la base con su misma firma; si se quiere marcar,"
+                    + " @override{}"));
+            return new Annotation("override", new ArrayList<>(), at.linea, at.columna);
+        }
         espera("{", "'{' tras '@" + nombre + "' (las llaves van aunque no lleven nada)");
         List<AnnEntry> entradas = new ArrayList<>();
         while (!es("}")) {
@@ -570,9 +710,12 @@ final class JcParser {
         while (true) {
             IExpr tamano = null;
             if (acepta("[")) {
-                if (es("]")) throw error("los corchetes sin tamaño van con el tipo: int[] " + nm);
-                if (tipo instanceof ArrayTypeRef) throw error("un array de tamaño fijo es de un tipo simple: int nums[10]");   // punto 33
-                tamano = expresion();
+                if (es("]")) {
+                    apunta(error("los corchetes sin tamaño van con el tipo: int[] " + nm));
+                } else {
+                    if (tipo instanceof ArrayTypeRef) throw error("un array de tamaño fijo es de un tipo simple: int nums[10]");   // punto 33
+                    tamano = expresion();
+                }
                 espera("]");
             }
             IExpr valor = acepta("=") ? expresion() : null;
@@ -691,8 +834,9 @@ final class JcParser {
      * En una clase (punto 34): el constructor, sin tipo y con el nombre de la clase, con `: base(…)` o `: this(…)`,
      * que son la primera sentencia de BP; el destructor, `function ~Clase()`; y {@code deClase}, lo `static`.
      */
-    private FuncDef funcion(boolean isPublic, boolean isPrivate, boolean isFinal, boolean isNative, String deClase) {
-        Tok tok = espera("function");
+    private FuncDef funcion(boolean isPublic, boolean isPrivate, boolean isFinal, boolean isNative, String deClase,
+                            boolean sinPalabra) {   // V9 #860 (c): le falta `function`, y ya se ha dicho
+        Tok tok = sinPalabra ? actual() : espera("function");
         boolean isEventHandler = acepta("event");
         boolean isDestructor = false, ctor = false;
         String dtorEscrito = null;
@@ -728,7 +872,11 @@ final class JcParser {
             while (acepta(",")) ps.add(parametro());
         }
         espera(")");
-        if (esNombre("throws")) throw error("JC no declara las excepciones de una función: 'throws' no va");
+        if (esNombre("throws")) {
+            apunta(error("JC no declara las excepciones de una función: 'throws' no va"));
+            avanza();
+            do { nombrePunteado("el nombre de una excepción"); } while (acepta(","));
+        }
         // `: base(…)` y `: this(…)`: la primera sentencia del constructor de BP, `super(…)` o la delegación.
         IStmt inicial = null;
         if (acepta(":")) {
@@ -817,7 +965,10 @@ final class JcParser {
     }
 
     private Param parametro() {
-        if (es("final")) throw error("un parámetro no lleva 'final'");
+        if (es("final")) {
+            apunta(error("un parámetro no lleva 'final'"));
+            avanza();
+        }
         boolean esVar = acepta("var");                 // V8/H7.4: `var int n`
         TypeRef tp = tipo();
         Tok n = actual();
@@ -871,7 +1022,11 @@ final class JcParser {
      *  en C# y en Java, y aquí no tiene forma. */
     private IExpr arrayNuevo(IExpr tipo) {
         Tok op = espera("[", "'[' tras el tipo: new int[n]");
-        if (es("]")) throw error("new T[n] lleva el tamaño; con los elementos escritos, sin new: [1, 2, 3]");
+        if (es("]")) {
+            apunta(error("new T[n] lleva el tamaño; con los elementos escritos, sin new: [1, 2, 3]"));
+            avanza();
+            return es("{") ? entreLlaves() : tipo;
+        }
         IExpr tam = expresion();
         espera("]");
         if (es("[")) throw error("un array de arrays no se crea con new: tras 'new A[n]' no va otro '['");
@@ -884,8 +1039,12 @@ final class JcParser {
      *  análisis. */
     private List<TypeRef> argumentosDeTipo() {
         espera("<");
-        if (es(">")) throw error("JC no tiene el <> de Java: los tipos se escriben, new List<Integer>()");
         List<TypeRef> args = new ArrayList<>();
+        if (es(">")) {
+            apunta(error("JC no tiene el <> de Java: los tipos se escriben, new List<Integer>()"));
+            avanza();
+            return args;
+        }
         args.add(tipo());
         while (acepta(",")) args.add(tipo());
         if (es(">>")) {   // V8/H8 (#793): `List<List<T>>`: el lexer lee un desplazamiento, y al cerrar un tipo son dos `>`
@@ -931,8 +1090,14 @@ final class JcParser {
         espera("{");
         List<IStmt> out = new ArrayList<>();
         while (!es("}")) {
-            if (esFin()) throw error("falta la '}' que cierra el bloque");
-            sentencia(out);
+            if (esFin()) throw finInesperado("falta la '}' que cierra el bloque");
+            int desde = pos;
+            try {
+                sentencia(out);
+            } catch (JcLexer.Error e) {
+                apunta(e);
+                saltaDesde(desde);
+            }
         }
         espera("}");
         return out;
@@ -949,11 +1114,30 @@ final class JcParser {
     private void sentencia(List<IStmt> out) {
         Tok t = actual();
         if (es("{")) throw error("un bloque suelto: en JC, como en BP, un bloque va con su if, while, for…");
-        if (es("final")) throw conFinal();
-        if (es("var") && mira(1).tipo == Tipo.NOMBRE) throw error(sinVar());
-        if ((es("super") || es("this")) && mira(1).es("("))
-            throw error("el constructor " + (es("super") ? "de la base" : "de la misma clase") + " se llama en la cabecera, como en"
-                    + " C#: function " + (clase != null ? clase : "Clase") + "(…) : " + (es("super") ? "base" : "this") + "(…)");
+        if (es("final")) {
+            int p = pos;
+            JcLexer.Error e = conFinal();
+            pos = p;
+            apunta(e);
+            avanza();
+        }
+        if (es("var") && mira(1).tipo == Tipo.NOMBRE) {
+            apunta(error(sinVar()));
+            avanza();
+            avanza();
+            if (acepta("=")) expresion();
+            espera(";");
+            return;
+        }
+        if ((es("super") || es("this")) && mira(1).es("(")) {
+            apunta(error("el constructor " + (es("super") ? "de la base" : "de la misma clase") + " se llama en la cabecera, como en"
+                    + " C#: function " + (clase != null ? clase : "Clase") + "(…) : " + (es("super") ? "base" : "this") + "(…)"));
+            avanza();
+            espera("(");
+            argumentos();
+            espera(";");
+            return;
+        }
         if (esNombre("System") && mira(1).es(".") && mira(3).es(".") && (mira(4).es("print") || mira(4).es("println")))
             throw error("en JC es println(x), con el salto de línea, o print(x), sin él");
         if (es("if"))       { out.add(si()); return; }
@@ -1078,7 +1262,8 @@ final class JcParser {
         Tok t = espera("for");
         String nombreDelBucle = esNombre() ? nombre("el nombre del bucle") : null;   // V8/H8: `for miLoop (int i = 0; …) { … }`
         espera("(");
-        recorridoDeJava();
+        ForStmt deJava = recorridoDeJava(t, nombreDelBucle);
+        if (deJava != null) return deJava;
         espera("int", "'int': la variable del for es un int, como en BP");   // punto 11
         String i = nombre("el nombre de la variable del for");
         espera("=");
@@ -1089,7 +1274,12 @@ final class JcParser {
         boolean sube;
         if (acepta("<=")) sube = true;
         else if (acepta(">=")) sube = false;
-        else throw error("la condición del for es '" + i + " <= límite' si sube, o '" + i + " >= límite' si baja");   // punto 11
+        else {
+            JcLexer.Error e = error("la condición del for es '" + i + " <= límite' si sube, o '" + i + " >= límite' si baja");   // punto 11
+            if (!es("<") && !es(">")) throw e;
+            apunta(e);
+            sube = avanza().texto.equals("<");
+        }
         IExpr hasta = expresion();
         espera(";");
         if (!(esNombre() && actual().texto.equals(i))) throw error("el incremento del for es de '" + i + "'");   // punto 11
@@ -1131,9 +1321,19 @@ final class JcParser {
         Tok t = espera("foreach");
         String nombreDelBucle = esNombre() ? nombre("el nombre del bucle") : null;   // V8/H8: `foreach miLoop (var x in l) { … }`
         espera("(");
-        espera("var", "'var': la variable del foreach toma el tipo de los elementos");   // punto 16
+        if (!es("var") && esDeclaracion()) {   // `foreach (Item it in l)`: se dice, y se sigue
+            apunta(error("se esperaba 'var': la variable del foreach toma el tipo de los elementos, encontrado " + actual()));
+            tipo();
+        } else {
+            espera("var", "'var': la variable del foreach toma el tipo de los elementos");   // punto 16
+        }
         String x = nombre("el nombre de la variable del foreach");
         espera("in");
+        return recorrido(t, nombreDelBucle, x);
+    }
+
+    /** Lo recorrido, la `)` y el cuerpo de un foreach. */
+    private ForStmt recorrido(Tok t, String nombreDelBucle, String x) {
         IExpr col = expresion();
         espera(")");
         boolean conLlaves = es("{");
@@ -1287,8 +1487,14 @@ final class JcParser {
     private List<IStmt> seccion() {
         List<IStmt> out = new ArrayList<>();
         while (!es("case") && !es("default") && !es("}")) {
-            if (esFin()) throw error("falta la '}' que cierra el switch o el parallel");
-            sentencia(out);
+            if (esFin()) throw finInesperado("falta la '}' que cierra el switch o el parallel");
+            int desde = pos;
+            try {
+                sentencia(out);
+            } catch (JcLexer.Error e) {
+                apunta(e);
+                saltaDesde(desde);
+            }
         }
         return out;
     }
@@ -1374,9 +1580,12 @@ final class JcParser {
      *  debajo de `||` y asociativo por la derecha, como en C#. */
     private IExpr expresion() {
         IExpr c = o();
-        if (asignacionDe(actual()) != null)
-            throw error("una asignación es una sentencia, no va dentro de una expresión"
-                    + (es("=") ? " (para comparar, ==)" : ""));
+        if (asignacionDe(actual()) != null) {
+            apunta(error("una asignación es una sentencia, no va dentro de una expresión"
+                    + (es("=") ? " (para comparar, ==)" : "")));
+            avanza();
+            return expresion();
+        }
         if (!es("?")) return c;
         Tok q = avanza();
         IExpr si = expresion();
@@ -1452,9 +1661,8 @@ final class JcParser {
             if (es("<") || es(">") || es("<=") || es(">=")) {
                 Tok op = avanza();
                 l = new BinaryExpr(op.texto, l, desplazamiento(), op.linea, op.columna);
-            } else if (esNombre("instanceof")) {
-                throw error("en JC es 'is', como en C#");
-            } else if (es("is")) {
+            } else if (es("is") || esNombre("instanceof")) {
+                if (!es("is")) apunta(error("en JC es 'is', como en C#"));
                 Tok op = avanza();
                 l = new InstanceOfExpr(l, nombrePunteado("el nombre de una clase tras 'is'"), op.linea, op.columna);
             } else {
@@ -1494,7 +1702,11 @@ final class JcParser {
         Tok t = actual();
         if (acepta("-")) return new UnaryExpr("-", unario(), t.linea, t.columna);
         if (acepta("!")) return new UnaryExpr("not", unario(), t.linea, t.columna);
-        if (es("++") || es("--")) throw error("++ y -- sólo como sentencia, detrás: v++;");   // punto 12
+        if (es("++") || es("--")) {
+            apunta(error("++ y -- sólo como sentencia, detrás: v++;"));   // punto 12
+            avanza();
+            return unario();
+        }
         if (es("~")) throw error("JC no tiene el ~ de C#: BP no tiene el no de bits");
         if (es("(") && esConversion()) return conversion();
         return potencia();
@@ -1503,7 +1715,10 @@ final class JcParser {
     /** La potencia, `**` (punto 18): la base, primaria; el exponente, unario, que la hace asociativa por la derecha. */
     private IExpr potencia() {
         IExpr base = postfijo();
-        if (es("++") || es("--")) throw error("++ y -- sólo como sentencia, no dentro de una expresión: v++; aparte");
+        if (es("++") || es("--")) {
+            apunta(error("++ y -- sólo como sentencia, no dentro de una expresión: v++; aparte"));
+            avanza();
+        }
         if (es("**")) {
             Tok op = avanza();
             return new BinaryExpr("^", base, unario(), op.linea, op.columna);
@@ -1595,10 +1810,25 @@ final class JcParser {
         return a;
     }
 
+    /** `{ 1, 2, 3 }`, los elementos de un array de Java y de C#: ya se ha dicho; se leen como `[1, 2, 3]`. */
+    private IExpr entreLlaves() {
+        Tok t = espera("{");
+        List<IExpr> el = new ArrayList<>();
+        while (!es("}") && !esFin()) {
+            el.add(expresion());
+            if (!acepta(",")) break;
+        }
+        espera("}");
+        return new ArrayLitExpr(el, t.linea, t.columna);
+    }
+
     private IExpr primario() {
         Tok t = actual();
         if (esLambda()) throw error("JC no tiene lambdas: un método, con objeto::metodo (this::pulsado)");
-        if (es("{")) throw error("los elementos de un array van entre corchetes: [1, 2, 3]");
+        if (es("{")) {
+            apunta(error("los elementos de un array van entre corchetes: [1, 2, 3]"));
+            return entreLlaves();
+        }
         switch (t.tipo) {
             case ENTERO:   avanza(); return new IntLitExpr((Long) t.valor, t.linea, t.columna);
             case LARGO:    avanza(); return new LongLitExpr((Long) t.valor, t.linea, t.columna);
@@ -1679,7 +1909,11 @@ final class JcParser {
             avanza();
             return new SuperExpr(t.linea, t.columna);
         }
-        if (es("super")) throw error("en JC es 'base', como en C#");   // punto 34
+        if (es("super")) {
+            apunta(error("en JC es 'base', como en C#"));   // punto 34
+            avanza();
+            return new SuperExpr(t.linea, t.columna);
+        }
         if (t.tipo == Tipo.RESERVADA && TIPOS.containsKey(t.texto))
             throw error("en JC, una conversión se escribe (" + t.texto + ") x");   // punto 23
         throw error("se esperaba una expresión, encontrado " + t);

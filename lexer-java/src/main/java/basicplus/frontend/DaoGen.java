@@ -82,8 +82,11 @@ public final class DaoGen {
     static final class Entidad {
         final String clase;
         final String tabla;
+        final String fichero;   // dónde está escrita: X.bp o X.jc
         final List<Campo> campos = new ArrayList<>();
-        Entidad(String clase, String tabla) { this.clase = clase; this.tabla = tabla; }
+        Entidad(String clase, String tabla, String fichero) {
+            this.clase = clase; this.tabla = tabla; this.fichero = fichero;
+        }
         Campo pk() { for (Campo c : campos) if (c.pk) return c; return null; }
     }
 
@@ -136,7 +139,7 @@ public final class DaoGen {
      *  pudo ni recorrer. Lo comparten generar() y verificar(). */
     private static Map<String, List<Entidad>> barrer(Path srcDir, Resultado r) {
         Map<String, List<Entidad>> porModulo = new LinkedHashMap<>();
-        try (DirectoryStream<Path> ds = Files.newDirectoryStream(srcDir, "*.bp")) {
+        try (DirectoryStream<Path> ds = Files.newDirectoryStream(srcDir, "*.{bp,jc}")) {   // V9 #897: y en JC
             for (Path f : ds) {
                 // Los propios generados se saltan: si no, la segunda pasada
                 // intentaria generar el DAO de un DAO.
@@ -317,6 +320,9 @@ public final class DaoGen {
     // ========================================================================
 
     private static ModuleNode parsear(String fuente, Path f, Resultado r) {
+        if (Main.esJc(f)) {
+            try { return JcParser.leer(fuente); } catch (JcLexer.Error e) { return null; }   // lo dice el compilador
+        }
         Lexer lx = new Lexer(fuente);
         List<Token> toks = lx.tokenize();
         if (!lx.getErrors().isEmpty()) {
@@ -342,7 +348,7 @@ public final class DaoGen {
 
             Ast.AnnEntry tabla = bdClase.get("tabla");
             if (tabla == null || !(tabla.value instanceof String)) continue;  // ya lo dijo el semántico
-            Entidad ent = new Entidad(cd.name, (String) tabla.value);
+            Entidad ent = new Entidad(cd.name, (String) tabla.value, f.getFileName().toString());
 
             for (ITopLevelDecl m : cd.members) {
                 if (!(m instanceof PropertyDef)) continue;
@@ -454,16 +460,16 @@ public final class DaoGen {
             return;
         }
         try {
-            Files.write(destino, (cabecera(modEnt, hash) + cuerpo).getBytes(StandardCharsets.UTF_8));
+            Files.write(destino, (cabecera(ents.get(0).fichero, hash) + cuerpo).getBytes(StandardCharsets.UTF_8));
             r.escritos.add(destino.getFileName().toString());
         } catch (IOException ex) {
             r.errores.add(destino + ": no se pudo escribir (" + ex.getMessage() + ")");
         }
     }
 
-    private static String cabecera(String modEnt, String hash) {
+    private static String cabecera(String fichero, String hash) {
         return "// ⚠️  NO EDITAR — este fichero lo genera `DAO build` a partir de las\n"
-             + "//     entidades de `" + modEnt + ".bp`, y se REHACE cada vez.\n"
+             + "//     entidades de `" + fichero + "`, y se REHACE cada vez.\n"
              + "//\n"
              + "//     Si necesitas más de lo que hay aquí, NO lo toques: crea una clase\n"
              + "//     que herede de la que quieras ampliar. Así puedes regenerar sin\n"

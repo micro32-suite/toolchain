@@ -412,16 +412,19 @@ bp run samples/out/Hola.mod
 
 <h3 id="multilinea">3.5 Continuación de línea</h3>
 <p>
-  El salto de línea termina la sentencia, <strong>salvo dentro de paréntesis
-  o corchetes abiertos</strong>: ahí el salto no es significativo y la
-  expresión continúa en la línea siguiente. Para partir una expresión larga,
-  enciérrala en <code>( )</code>:
+  El salto de línea termina la sentencia, <strong>salvo en dos sitios</strong>, donde sigue en la línea
+  siguiente: dentro de paréntesis o corchetes abiertos, y cuando la línea acaba en un operador
+  (<code>+</code>, <code>==</code>, <code>and</code>…), en <code>:=</code>, en una coma o en un punto. El
+  operador va al final de la línea, no al principio de la que sigue:
 </p>
 <pre><code><span class="kw">print</span> (<span class="str">"total = "</span> + intToString(a)
     + <span class="str">" / "</span> + intToString(b))      <span class="comment">// OK: dentro de ( )</span>
 
 <span class="kw">var</span> v: <span class="type">integer</span>[] := [<span class="num">1</span>, <span class="num">2</span>,
-                       <span class="num">3</span>, <span class="num">4</span>]          <span class="comment">// OK: dentro de [ ]</span></code></pre>
+                       <span class="num">3</span>, <span class="num">4</span>]          <span class="comment">// OK: dentro de [ ]</span>
+
+<span class="kw">print</span> <span class="str">"total = "</span> + intToString(a) +
+    <span class="str">" / "</span> + intToString(b)        <span class="comment">// OK: la línea de arriba acaba en +</span></code></pre>
 
 <!-- =========================================================== -->
 <!-- =========================================================== -->

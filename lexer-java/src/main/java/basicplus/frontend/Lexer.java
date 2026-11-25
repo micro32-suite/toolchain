@@ -299,7 +299,7 @@ public final class Lexer {
     // CONTINÚA en la siguiente (el NEWLINE no se emite como terminador). Son
     // tokens que NO pueden cerrar una sentencia: esperan un operando/elemento a
     // la derecha. NO se incluyen ':' (etiquetas case / tipos), ';' ni cierres.
-    private static final java.util.EnumSet<TokenType> CONTINUERS = java.util.EnumSet.of(
+    static final java.util.EnumSet<TokenType> CONTINUERS = java.util.EnumSet.of(
             TokenType.PLUS, TokenType.MINUS, TokenType.STAR, TokenType.SLASH, TokenType.CARET,
             TokenType.EQ, TokenType.NEQ, TokenType.LT, TokenType.GT, TokenType.LE, TokenType.GE,
             TokenType.BAR, TokenType.AMP,

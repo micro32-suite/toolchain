@@ -82,11 +82,23 @@ final class JcLexer {
 
     private JcLexer(String src) { this.src = src; }
 
-    static List<Tok> leer(String fuente) {
+    static List<Tok> leer(String fuente) { return leer(fuente, null, 0); }
+
+    /** V9 #860 (c) — con una lista, los errores se apuntan en ella, hasta `tope`, y se sigue por la línea siguiente. */
+    static List<Tok> leer(String fuente, List<Error> errores, int tope) {
         JcLexer lx = new JcLexer(fuente);
         List<Tok> out = new ArrayList<>();
         while (true) {
-            Tok t = lx.siguiente();
+            Tok t;
+            try {
+                t = lx.siguiente();
+            } catch (Error e) {
+                if (errores == null) throw e;
+                errores.add(e);
+                if (errores.size() >= tope) return out;
+                while (!lx.fin() && lx.ver() != '\n') lx.avanza();
+                continue;
+            }
             out.add(t);
             if (t.tipo == Tipo.FIN) return out;
         }

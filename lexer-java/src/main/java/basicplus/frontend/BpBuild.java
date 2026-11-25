@@ -212,6 +212,17 @@ public final class BpBuild {
      *  comentarios //. */
     private Map<String, Object> raw;
 
+    /** V9 #897 — si {@code p} es el DAO de unas entidades que están a su lado (XDao.bp, con X.bp o X.jc), el nombre de su
+     *  fichero; si no, null. Lo genera DAO build: que falte no es que el proyecto esté mal. */
+    static String entidadesDelDao(Path p) {
+        String n = p.getFileName().toString();
+        if (!n.endsWith("Dao.bp") || n.equals("Dao.bp")) return null;
+        String de = n.substring(0, n.length() - "Dao.bp".length());
+        for (String ext : new String[] { ".bp", ".jc" })
+            if (Files.isRegularFile(p.resolveSibling(de + ext))) return de + ext;
+        return null;
+    }
+
     /**
      * Carga y valida un .bpbuild desde disco. Lanza IOException si:
      *   - el JSON está malformado;
@@ -288,8 +299,10 @@ public final class BpBuild {
                         + " 'sourceDir' y 'dependencies'.)");
                 /* Que falte se dice AQUÍ. Si no, el build compila lo que sí
                  * está, el pack sale sin ese módulo y el fallo aparece en la
-                 * placa como un import que no resuelve. */
-                if (!Files.isRegularFile(p))
+                 * placa como un import que no resuelve. V9 #897 — salvo el DAO
+                 * que aún no se ha generado: si no, el proyecto que lo nombra no
+                 * se podría abrir para generarlo (y lo dice el build). */
+                if (!Files.isRegularFile(p) && entidadesDelDao(p) == null)
                     throw new IOException(file + ": 'sources' apunta a '" + e
                         + "' y ahí no hay ningún fichero (" + p + ")");
                 if (!b.sources.contains(p.toString())) {

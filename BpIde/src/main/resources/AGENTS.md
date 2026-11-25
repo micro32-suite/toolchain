@@ -36,8 +36,8 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
 - `bp run` exits with the program's code: 0 if it ends well, 1 with an uncaught exception, 2 if it does not compile
   (then the errors go to stderr and nothing runs).
 - Errors come with their file, line and column: `App.bp:7:15: error semántico: …` (also those of an imported module,
-  with its own file). Read the whole message: it usually says how to fix it. `bp build` says only that, or
-  `compilado: out/X.mod`.
+  with its own file). Read the whole message: it usually says how to fix it. `bp build` says only that (the first ten;
+  `--max-errores=0`, all), or `compilado: out/X.mod`.
 - On stdout, only what the program prints, the same in both VMs: `bp run X.bp > out.txt` keeps just that. The VMs'
   own lines (`[miVM] …`, `[bpvm] …`) go to stderr.
 - An uncaught exception says where, on stderr: `=== traza: X+122 X+39 ===`, and under it the file, the line and the
@@ -138,6 +138,7 @@ code. Files on the PC: only inside the folder the user allowed.
 | public fields | `public property x: integer` |
 | `{ }` and `;` | Every block closes with its name or keyword: `end main`, `end Counter`, `endif`, `endwh`, `next i`, `endtry`. No semicolons. |
 | `=` to assign | `:=` assigns; `==` compares |
+| a long line | It goes on if it ends in an operator or a comma: `"a" +` at the end of the line, not at the start of the next |
 
 What does work as you would expect: `class B extends A`, `super(x)` in the constructor and `super.method()`;
 `for i := 0 to n do … next i` (`n` included); `for x in list do … next x`; `"text " + number`; `+=`;
@@ -159,7 +160,7 @@ the same, with the same names and the same traps as above.
 | `for (Item x : list)` | `foreach (var x in list)` |
 | `System.out.println(x)` | `println(x)`; with several pieces, `println("a ", n)`; `print` does not end the line |
 
-- The JC compiler stops at the first syntax error: fix them one at a time.
+- The compiler gives the first ten errors, in JC too, each with how it is written.
 - The compiler translates between the two languages, and both compile to the same `.mod`:
   ```
   bp frontend X.bp --escribir-jc > X.jc     # BP -> JC

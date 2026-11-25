@@ -495,6 +495,8 @@ public final class Parser {
                         msg += " — en BP es 'function', sin tipo si no devuelve nada: function f() … end f";
                     } else if ("dim".equalsIgnoreCase(tok.lexeme)) {
                         msg += " — en BP es 'var': var x: integer";
+                    } else if (empiezaPorOperador(tok)) {
+                        msg += SIGUE_ARRIBA;
                     }
                     error(msg);
                 }
@@ -1124,6 +1126,11 @@ public final class Parser {
     private IStmt parseStmt() {
         panicMode = false;                      // §7a: cada sentencia parte "limpia"
         TokenType t = current().type;
+        if (empiezaPorOperador(current())) {   // V9 #860
+            error("una sentencia no empieza por '" + current().lexeme + "'" + SIGUE_ARRIBA);
+            synchronize();
+            return null;
+        }
         switch (t) {
             case LBRACE:   return parseDestructAssignStmt();   // tuplas: { a, b } := f()
             case VAR:      return parseVarDecl(false);
@@ -1191,6 +1198,14 @@ public final class Parser {
             case SHR_ASSIGN:   return AssignOpKind.SHR_ASSIGN;
             default:           return null;
         }
+    }
+
+    /** V9 #860 — en BP la línea que sigue en la de abajo acaba en el operador ({@link Lexer#CONTINUERS}); la de abajo no
+     *  empieza por él. */
+    private static final String SIGUE_ARRIBA = ": si es la línea de arriba que sigue, va al final de ella";
+
+    private static boolean empiezaPorOperador(Token t) {
+        return t.type != TokenType.NOT && Lexer.CONTINUERS.contains(t.type);
     }
 
     private static final String IGUAL_NO_ASIGNA =

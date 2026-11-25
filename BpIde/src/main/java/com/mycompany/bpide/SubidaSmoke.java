@@ -10,7 +10,9 @@
 //      que llegar igual, y por el segundo intento;
 //   4. (paso 4) la bajada y el listado troceados: el fichero grande, bajado y medido,
 //      y en el listado con su tamaño;
-//   5. borra lo subido.
+//   5. borra lo subido;
+//   6. (V9 #899) un programa en un .pack, subido como lo sube el Run on Device (Despliegue)
+//      dos veces seguidas: las dos se queda en la placa (la segunda lo borraba).
 //
 // Uso:
 //   java -cp BpIde/target/BpIde-6.0.jar com.mycompany.bpide.SubidaSmoke <COMx | host:puerto> [KB]
@@ -18,6 +20,8 @@
 // ============================================================
 package com.mycompany.bpide;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.util.Arrays;
 import java.util.Random;
 
@@ -28,6 +32,25 @@ public final class SubidaSmoke {
     private static void mira(boolean cond, String que) {
         System.out.println((cond ? "  ok   : " : "  FALLO: ") + que);
         if (!cond) fallos++;
+    }
+
+    private static void elPackSeQueda(String destino) throws Exception {
+        File pack = new File(Files.createTempDirectory("subida").toFile(), "Subida.pack");
+        Files.write(pack.toPath(), new byte[4096]);
+        boolean serie = destino.toUpperCase().startsWith("COM") || destino.startsWith("/dev/");
+        Backend b = serie ? new SerialBackend() : new RedBackend();
+        b.connect(destino);
+        try {
+            for (int vez = 1; vez <= 2; vez++) {
+                String remoto = new Despliegue().sube(b, null, null, pack, null, null, null, "/app/subida", s -> { });
+                boolean esta = false;
+                for (Backend.Entry e : b.list()) if (e.name.equals(remoto) && e.size == 4096) esta = true;
+                mira(esta, "un .pack subido por Run on Device, la vez " + vez + ": está en la placa (" + remoto + ")");
+            }
+            b.del("/app/subida/Subida.pack");
+        } finally {
+            b.close();
+        }
     }
 
     public static void main(String[] args) throws Exception {
@@ -84,6 +107,7 @@ public final class SubidaSmoke {
             mira(esta, "el listado lo trae, con su tamaño");
             c.deleteFile(ruta, 10_000);
         }
+        elPackSeQueda(destino);
         System.out.println(fallos == 0 ? "[status=OK]" : "[status=FAIL]");
         System.exit(fallos == 0 ? 0 : 1);
     }
