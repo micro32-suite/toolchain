@@ -33,10 +33,6 @@ public class SerialBackend extends AbstractBpvmBackend {
         c.connectSerial(endpoint, DEFAULT_BAUD);
     }
 
-    @Override protected String helloLabel(String endpoint) {
-        return "bpvm-pico wire-v1 @ " + endpoint;
-    }
-
     @Override protected void postConnect(BpvmClient c) throws IOException {
         // Sincronizar RTC del Pico con wall clock del PC. Best-effort:
         // si el firmware no soporta TIME, traga el error silenciosa.

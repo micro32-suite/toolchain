@@ -835,7 +835,8 @@ gpio.pin[<span class="num">3</span>] := <span class="kw">true</span>        <spa
   literal, una llamada, un objeto, una expresión— se <em>calcula al cargar el
   módulo</em>, en el orden en que están escritas, después de inicializarse los
   módulos que importa y antes de su función inicializadora (la función con
-  el mismo nombre que el módulo), que ya las encuentra puestas.
+  el mismo nombre que el módulo; en uno llamado <code>Main</code>, su <code>Main</code> es
+  el programa, y corre una vez), que ya las encuentra puestas.
 </p>
 <p>
   Un <code>string</code> global, un campo o una property <code>string</code> sin valor —que nadie ha

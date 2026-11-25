@@ -1088,7 +1088,7 @@ public final class PicoExplorer extends JPanel {
             Comandos.Comando c = comandos.get(l.comando);
             if (c.esSoloVentana() && l.parametros.isEmpty()) { comandos.desdeLaVentana(c.id); return; }
             Comandos.Quien quien = new Comandos.Quien("la consola",
-                    r -> new java.io.File(r).getAbsoluteFile().toPath().normalize().toString());
+                    r -> new java.io.File(r).getAbsoluteFile().toPath().normalize().toString(), true);
             no = Comandos.revisa(c, l.parametros, quien.ruta);
             if (no == null) {
                 comandos.ejecuta(c.id, l.parametros, quien).thenAccept(r -> {

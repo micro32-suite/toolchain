@@ -8,7 +8,7 @@
 // put/del/run/reset, plus la conversión chunk→línea del OUTPUT y el
 // auto-CONTINUE en PausedEvent. La subclase solo aporta:
 //   - openTransport(endpoint, client): connectRemote o connectSerial.
-//   - displayName() / helloLabel(endpoint).
+//   - displayName() / porDonde().
 //   - mem() / save() / log(): los 3 puntos donde el wire v1 admite
 //     legítima divergencia plataforma-específica.
 //
@@ -45,9 +45,10 @@ public abstract class AbstractBpvmBackend implements Backend {
      *  según corresponda. */
     protected abstract void openTransport(String endpoint, BpvmClient client) throws IOException;
 
-    /** Etiqueta legible para devolver desde connect(). Se muestra en la
-     *  barra de status del PicoExplorer. */
-    protected abstract String helloLabel(String endpoint);
+    /** V9 #869 y #878 — por dónde se llega a él, para la barra del panel y el resultado de conectar: « por la red», o nada.
+     *  Quién es lo dice él en su HELLO_REPLY (hasta V9 lo ponía cada backend a mano: el micro simulado era «bpvm-java», y
+     *  cualquier placa por serie, «bpvm-pico»). */
+    protected String porDonde() { return ""; }
 
     /** Hook opcional para sincronización post-handshake (e.g., TIME en
      *  Pico). La implementación por defecto no hace nada. */
@@ -67,7 +68,8 @@ public abstract class AbstractBpvmBackend implements Backend {
         }
         try { postConnect(c); } catch (IOException ignored) { /* best effort */ }
         this.client = c;
-        return helloLabel(endpoint);
+        String quien = c.serverName().isEmpty() ? displayName() : c.serverName();
+        return quien + porDonde() + " @ " + endpoint;
     }
 
     @Override public boolean isConnected() {

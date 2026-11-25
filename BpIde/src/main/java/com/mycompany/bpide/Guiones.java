@@ -217,9 +217,14 @@ public final class Guiones {
             m.put("ok", r.ok);
             m.put("mensaje", mensaje);
             hechos.add(m);
-            if (!r.ok) {
+            /* V9 #870 — el programa pide datos: los da la línea siguiente («responder»); si no es eso, el guion para (el
+             * programa se queda esperando). */
+            boolean sinResponder = r.ok && r.datos().containsKey("pide")
+                    && (i + 1 == g.pasos.size() || !g.pasos.get(i + 1).comando.id.equals("responder"));
+            if (!r.ok || sinResponder) {
                 acaba(Resultado.aviso(TITULO, "el guion " + g.nombre + ", parado en la línea " + paso.linea + " ("
-                        + paso.comando.id + "): " + mensaje + "\nHechos " + i + " de " + cuantos(g.pasos.size()) + ".",
+                        + paso.comando.id + "): " + mensaje + (sinResponder ? "; el guion no responde, y el programa sigue"
+                        + " esperando («parar» lo para)" : "") + "\nHechos " + i + " de " + cuantos(g.pasos.size()) + ".",
                         JOptionPane.WARNING_MESSAGE).con("linea", paso.linea));
                 return;
             }

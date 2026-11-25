@@ -462,8 +462,9 @@ public final class DebugServer implements AutoCloseable {
                 case "BOOTSEL":
                 case "SAVE":
                 case "LOG_DUMP":
-                    // Sólo aplicables al firmware Pico. La VM Java los rechaza.
-                    sendError(id, "UNSUPPORTED", type + ": no soportado en VM Java (sólo Pico)");
+                case "LOG_CLEAR":
+                    // Los tienen las placas y el micro simulado. La VM Java los rechaza.
+                    sendError(id, "UNSUPPORTED", type + ": la VM Java no lo tiene (lo tienen las placas y el micro simulado)");
                     break;
 
                 // ---- TERMINAL ----

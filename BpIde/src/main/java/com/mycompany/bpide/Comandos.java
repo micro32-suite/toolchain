@@ -136,13 +136,18 @@ public final class Comandos {
     public static final class Quien {
         public final String nombre;
         final Function<String, String> ruta;
+        /** La persona, que está delante (la consola): los datos que pida un programa, en su formulario (#870). */
+        final boolean persona;
 
-        public Quien(String nombre, Function<String, String> ruta) {
+        public Quien(String nombre, Function<String, String> ruta) { this(nombre, ruta, false); }
+
+        Quien(String nombre, Function<String, String> ruta, boolean persona) {
             this.nombre = nombre;
             this.ruta = ruta;
+            this.persona = persona;
         }
 
-        /** El mismo, con otro nombre («el guion X, línea 3»). */
+        /** El mismo, con otro nombre («el guion X, línea 3»); ya no es la persona: lo que haga, sin ella. */
         Quien llamado(String otro) { return new Quien(otro, ruta); }
     }
 

@@ -392,14 +392,11 @@ public class Main {
                 cargado = false;
                 falloDeCarga = true;
             } catch (edu.bpgenvm.vm.ModuleManager.LinkException enlace) {
-                // V7/H2 — un símbolo cross-module que no resuelve: la misma línea por
-                // stdout que el host de la VM-C (test/main.c) y exit 1, en vez de una
+                // V7/H2 — un símbolo cross-module que no resuelve: la misma línea
+                // que el host de la VM-C (test/main.c) y exit 1, en vez de una
                 // traza de Java. Los marcadores de vtable y de layout (#500) caen aquí.
-                // (V9 #855: se queda en stdout por ahora; la red la lee de ahí —compat.sh
-                // norma_caso, mezcla.py clasificar—. Pasarla a stderr, por decidir.)
-                System.out.println("=== ERROR DE LINK: " + enlace.getMessage() + " ===");
-                System.out.flush();
-                System.err.println("link " + runMod + ": " + enlace.getMessage());
+                // V9 #855 — por la salida de errores, como lo demás que no es del programa.
+                System.err.println("=== ERROR DE LINK: " + enlace.getMessage() + " ===");
                 exitCode = 1;
                 exitReason = "link: " + enlace.getMessage();
                 cargado = false;

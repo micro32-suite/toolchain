@@ -1379,7 +1379,7 @@ public class FrmMain extends javax.swing.JFrame
         // V9 H1.3 (#854) — la guía para IA (AGENTS.md y el CLAUDE.md que la incluye), donde una IA la encuentra sola.
         List<Path> guia = new ArrayList<>();
         try {
-            guia = GuiaIa.dejaEn(dir.toPath());
+            guia = GuiaIa.dejaEn(dir.toPath(), s -> appendConsola("[ide] " + s + "\n"));
         } catch (java.io.IOException ex) {
             appendConsola("[ide] la guía para IA no se pudo dejar en el proyecto: " + ex.getMessage() + "\n");
         }
@@ -2444,6 +2444,7 @@ public class FrmMain extends javax.swing.JFrame
         deviceEntryHandled = false;
         deviceCs = 0;
         final CompletableFuture<Resultado> fin = esperaLaProximaParada();
+        datosPedidos = lanzadoPorSuNombre(p) ? new DatosPedidos(null) : null;   // V9 #870: lo que pida, como una parada
         final java.util.concurrent.atomic.AtomicBoolean compilo = new java.util.concurrent.atomic.AtomicBoolean(false);
 
         // Modo proyecto: el .bp a compilar es <sourceDir>/<main>.bp y el
@@ -2502,6 +2503,7 @@ public class FrmMain extends javax.swing.JFrame
                 onDebugResumed();
                 currentModuleManager = null;
                 acabaLaEjecucion();   // V8 #822
+                datosPedidos = null;   // V9 #870
                 // V9 H2.2 — el fin del programa, ya suelta la sesión; y si no llegó (la compilación falló, o la sesión
                 // acabó sin su EXITED), por qué.
                 Resultado finDelPrograma = finDepurandoEnElPc;
@@ -2684,7 +2686,9 @@ public class FrmMain extends javax.swing.JFrame
         // V9 H1.3 (#854) — la guía para IA, en su carpeta (lo que falte; no pisa nada): las instrucciones del servidor
         // la nombran, y Claude Code, abierto ahí, la lee solo.
         try {
-            for (Path g : GuiaIa.dejaEn(carpeta)) appendConsola("[ia] la guía para la IA: " + g + "\n");
+            for (Path g : GuiaIa.dejaEn(carpeta, s -> appendConsola("[ia] " + s + "\n"))) {
+                appendConsola("[ia] la guía para la IA: " + g + "\n");
+            }
         } catch (IOException ex) {
             appendConsola("[ia] la guía para la IA no se pudo dejar en " + carpeta + ": " + ex.getMessage() + "\n");
         }
@@ -2905,6 +2909,13 @@ public class FrmMain extends javax.swing.JFrame
                         + " compilación y la salida («salida»: lo que imprime el programa va ahí). Un programa a la vez.")
                 .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
+        comandos.registra("responder", "Responder al programa", this::responde)
+                .explica("Contesta a los datos que pide un programa (IO.prompt, en el PC) lanzado por su nombre: el resultado"
+                        + " de «ejecutar» (o del depurador) trae entonces «pide», lo que pide —su título, su mensaje y sus"
+                        + " «fields», cada uno con su name, su type y su default—, y el programa espera. Devuelve cómo"
+                        + " sigue: el fin, como «ejecutar», la próxima parada, u otros datos que pide.")
+                .parametro("valores", "los valores, en JSON, por el nombre de cada campo: {\"nombre\":\"Ana\",\"edad\":30};"
+                        + " sin él, {} (como Cancelar)");
         comandos.registra("parar", "Stop", p -> listo(parar()))
                 .ayuda("Parar (Ctrl+F2)")
                 .explica("Para el programa en marcha: el del PC (la VM local o la ventana de la VM-C) o el de la"
@@ -3547,6 +3558,8 @@ public class FrmMain extends javax.swing.JFrame
         empiezaLaSalida();
         ultimoExited = null;
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        final DatosPedidos dp = execute && lanzadoPorSuNombre(p) ? new DatosPedidos(fin) : null;   // V9 #870
+        datosPedidos = dp;
         final StringBuilder salida = new StringBuilder();
         final java.util.concurrent.atomic.AtomicBoolean compilo = new java.util.concurrent.atomic.AtomicBoolean(false);
 
@@ -3632,10 +3645,47 @@ public class FrmMain extends javax.swing.JFrame
             @Override
             protected void done() {
                 if (execute) acabaLaEjecucion();   // V8 #822
-                fin.complete(resultadoDeCompilar(que, execute, compilo.get(), salida.toString()));
+                Resultado r = resultadoDeCompilar(que, execute, compilo.get(), salida.toString());
+                if (dp == null) {
+                    fin.complete(r);
+                } else {   // V9 #870: a quien espere ahora (quien lo lanzó, o quien contestó lo último que pidió)
+                    datosPedidos = null;
+                    dp.di(r);
+                }
             }
         }.execute();
         return fin;
+    }
+
+    /** V9 #870 — lo que pide el programa del PC que está en marcha, si lo lanzaron por su nombre (la IA, un guion); null, si
+     *  lo lanzó la persona (la ventana, la consola): sus datos, en el formulario. */
+    private volatile DatosPedidos datosPedidos;
+
+    private static boolean lanzadoPorSuNombre(Map<String, Object> p) {
+        Object q = p.get(Comandos.QUIEN);
+        return q instanceof Comandos.Quien && !((Comandos.Quien) q).persona;
+    }
+
+    /** «responder»: los valores que pide el programa, y cómo sigue. */
+    private CompletableFuture<Resultado> responde(Map<String, Object> p) {
+        final DatosPedidos dp = datosPedidos;
+        if (dp == null || !dp.pidiendo()) return listo(Resultado.mal("responder: ningún programa está pidiendo datos"));
+        Object v = p.get("valores");
+        String valores = v == null || v.toString().trim().isEmpty() ? "{}" : v.toString().trim();
+        try {
+            if (!(edu.bpgenvm.util.Json.parse(valores) instanceof Map)) throw new IllegalArgumentException("no es un objeto");
+        } catch (RuntimeException e) {
+            return listo(Resultado.mal("responder: «valores» va en JSON, por el nombre de cada campo ({\"nombre\":\"Ana\"}): "
+                    + valores));
+        }
+        if (debug.isAttached()) {   // depurando: la próxima parada
+            CompletableFuture<Resultado> f = esperaLaProximaParada();
+            dp.responde(valores, null);
+            return f;
+        }
+        CompletableFuture<Resultado> f = new CompletableFuture<>();
+        dp.responde(valores, f);
+        return f;
     }
 
     /** V9 #891 — dónde empieza, en la consola, la salida de la orden de ahora (compilar, ejecutar, depurar…). */
@@ -4229,13 +4279,26 @@ public class FrmMain extends javax.swing.JFrame
                         salidaDepurando.append(s);   // V9 H2.2: depurando, en orden con las pausas (los resultados)
                         publish.accept(s);
                     });
+                } else if (datosPedidos != null) {
+                    final DatosPedidos dp = datosPedidos;   // V9 #870: la salida, en orden con lo que pide
+                    client.setOutputSink(s -> { dp.escribe(s); publish.accept(s); });
                 } else {
                     client.setOutputSink(publish::accept);
                 }
                 // N20 — IO.prompt(spec) del programa BP abre un JDialog
                 // construido a partir del spec JSON. Las respuestas
                 // serializadas regresan al thread BP bloqueado.
+                // V9 #870 — si lo lanzaron por su nombre, se le pide a quien lo lanzó: el comando acaba ahí, y «responder».
                 client.setPromptHandler((reqId, spec) -> {
+                    final DatosPedidos dp = datosPedidos;
+                    if (dp != null) {
+                        SwingUtilities.invokeLater(() -> {
+                            Resultado r = dp.pide(client, reqId, spec);
+                            publish.accept("[ide] " + r.mensaje + "\n");
+                            if (pauseInitially) avisaLaParada(r); else dp.di(r);
+                        });
+                        return;
+                    }
                     final String[] resp = {"{}"};
                     try {
                         SwingUtilities.invokeAndWait(() -> {

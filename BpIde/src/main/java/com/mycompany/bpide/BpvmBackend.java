@@ -16,7 +16,7 @@
 //   - openTransport: connectRemote(host, port).
 //   - mem(): sintetizado de listFiles (la VM Java no expone DF aún).
 //   - save(): no-op (VM Java siempre persiste al workdir host).
-//   - log(): UNSUPPORTED (no hay log persistente en VM Java).
+//   - log() y clearLog(): se le preguntan al otro lado (V9 #869): el micro simulado los atiende; la VM Java, no.
 // ============================================================
 package com.mycompany.bpide;
 
@@ -64,10 +64,6 @@ public final class BpvmBackend extends AbstractBpvmBackend {
         c.connectRemote(host, port);
     }
 
-    @Override protected String helloLabel(String endpoint) {
-        return "bpvm-java v1 @ " + endpoint;
-    }
-
     @Override public String mem() throws IOException {
         // VM Java no expone DF en wire v1 (la stdlib es la del workdir
         // host, sin límites). Sintetizamos sumando tamaños de listFiles
@@ -86,6 +82,12 @@ public final class BpvmBackend extends AbstractBpvmBackend {
     }
 
     @Override public String log() throws IOException {
-        throw new IOException("LOG_DUMP no soportado en VM Java (solo placa)");
+        require();
+        return client.logDump(TIMEOUT_MS);
+    }
+
+    @Override public void clearLog() throws IOException {
+        require();
+        client.logClear(TIMEOUT_MS);
     }
 }

@@ -118,6 +118,9 @@ code. Files on the PC: only inside the folder the user allowed.
   spaces, between quotes; a bare yes/no parameter is true; `//`, a comment), that stops at the first one that fails:
   `guion`, with one of the installation's (`guiones_listar`: installing the GUI or the database on a board, from
   scratch) or a `.guion` of yours. Write one when the user wants to repeat a task without you. IDE guide §14.
+- **A program that asks for data** (`IO.prompt`, on the PC only): run by you, it asks you. The result of `ejecutar` brings
+  `pide` (what it asks for) and the program waits; `responder`, with the values as JSON, goes on, and returns the end or
+  what it asks for next.
 - **The simulated micro keeps its state** between runs, like a board (its file system and its packs). If it carries
   things from before (old files in `/app`, a library that does not export what the program uses),
   `micro_simulado` with `de_cero: true` empties it (all its files and its packs zone; its configuration, the

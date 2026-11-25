@@ -36,7 +36,5 @@ public final class RedBackend extends SerialBackend {
         c.vigilarConexion();
     }
 
-    @Override protected String helloLabel(String endpoint) {
-        return "bpvm wire-v1 por la red @ " + endpoint;
-    }
+    @Override protected String porDonde() { return " por la red"; }
 }
