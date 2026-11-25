@@ -131,6 +131,8 @@ public final class PacksPanel extends JPanel {
         JPanel packPanel = new JPanel(new BorderLayout(4, 4));
         packPanel.setBorder(BorderFactory.createTitledBorder("Packs (cadena completa: activos y borrados)"));
         packTable.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        int[] anchos = { 80, 65, 115, 85, 45, 70, 45 };   // la fecha, entera: es con lo que se comparan dos packs
+        for (int i = 0; i < anchos.length; i++) packTable.getColumnModel().getColumn(i).setPreferredWidth(anchos[i]);
         packTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) onPackSelected();
         });

@@ -110,7 +110,7 @@ public class FrmBoard extends javax.swing.JFrame {
         setDefaultCloseOperation(javax.swing.WindowConstants.DISPOSE_ON_CLOSE);
         jSplitPane1.setLeftComponent(boardPanel);
         jSplitPane1.setRightComponent(packsPanel);
-        jSplitPane1.setDividerLocation(560);
+        jSplitPane1.setDividerLocation(540);
 
         /* #435 — LOS DOS PANELES, UNIDOS AQUI. El de carpetas (izquierda) sabe
          * QUE fichero se ha elegido; el de packs (derecha) sabe GRABARLO. Que

@@ -4725,7 +4725,7 @@ public class FrmMain extends javax.swing.JFrame
         fb.addWindowListener(new java.awt.event.WindowAdapter() {
             @Override public void windowClosed(java.awt.event.WindowEvent e) { picoExplorer.olvidaAlReconectar(vuelve); }
         });
-        fb.setSize(760, 520);
+        fb.setSize(1160, 680);   // V9 #875: con 760x520 no se veía ningún botón del panel de packs (pide 550 de ancho)
         fb.setLocationRelativeTo(this);
         fb.setVisible(true);
     }
