@@ -27,43 +27,18 @@ public class FrmBoard extends javax.swing.JFrame {
      */
     public FrmBoard(BpvmClient client, java.util.function.Consumer<String> log) {
         this();
-        if (log != null) {
-            boardPanel.setLog(log);
-            packsPanel.setLog(log);
-        }
-        attach(client);
-    }
-
-    /** Engancha (o re-engancha) el cliente compartido y refresca. */
-    /** V5/H8 — de dónde sale la arquitectura de la placa, para que el grabado
-     *  pueda elegir qué motor del pack va y relocalizarlo. Lo sabe el explorador
-     *  de la ventana principal, así que se le pide a él. */
-    public void setArchPlaca(java.util.function.IntSupplier s) {
-        if (packsPanel != null) packsPanel.setArchPlaca(s);
+        if (log != null) boardPanel.setLog(log);
+        clienteActual = client;
     }
 
     /** V7/H10 (D7) — reiniciar la placa y reconectar tras un PART_APPLY (lo hace el explorador de la ventana
-     *  principal). Al volver, la ventana se engancha al cliente NUEVO —el viejo se cerró con el reset— y refresca. */
+     *  principal). Al volver, el explorador avisa a quien la mira ({@link #attach}, V9 #875): la ventana se engancha al
+     *  cliente NUEVO —el viejo se cerró con el reset— y refresca. */
     public void setReiniciador(BoardMgrPanel.Reiniciador r) {
-        if (boardPanel == null) return;
-        if (r == null) { boardPanel.setReiniciador(null); return; }
-        boardPanel.setReiniciador((alVolver, alFallar) -> r.reiniciar(nuevo -> {
-            attach(nuevo);
-            alVolver.accept(nuevo);
-        }, alFallar));
+        if (boardPanel != null) boardPanel.setReiniciador(r);
     }
 
-    /** V7 #671 — tras un PACK_* que reinicia la placa (motores ya cargados), volver a conectar SIN mandar RESET (la
-     *  placa ya se reinicia sola). Al volver, la ventana se engancha al cliente NUEVO, como tras un PART_APPLY. */
-    public void setReconectador(BoardMgrPanel.Reiniciador r) {
-        if (packsPanel == null) return;
-        if (r == null) { packsPanel.setReconectador(null); return; }
-        packsPanel.setReconectador((alVolver, alFallar) -> r.reiniciar(nuevo -> {
-            attach(nuevo);
-            alVolver.accept(nuevo);
-        }, alFallar));
-    }
-
+    /** Engancha (o re-engancha, tras un reinicio) el cliente compartido y refresca. */
     public void attach(BpvmClient client) {
         this.clienteActual = client;   // #435: el diálogo del entorno lo necesita
         if (boardPanel != null) boardPanel.attach(client);
@@ -73,13 +48,24 @@ public class FrmBoard extends javax.swing.JFrame {
     /* #435 — el cliente vigente, para abrir el diálogo del entorno con él. */
     private BpvmClient clienteActual;
     private EnvDialog envDialog;
-    /* V9 #876 — los comandos del IDE y el entorno de la placa conectada: el diálogo no habla con la placa, los llama. */
+    /* V9 #876 y #875 — los comandos del IDE, y el entorno y los packs de la placa conectada: ni el diálogo del entorno ni
+     * el panel de packs hablan con la placa, los llaman. */
     private Comandos comandos;
     private EntornoPlaca entorno;
 
-    public void setEntorno(Comandos comandos, EntornoPlaca entorno) {
+    /** Lo pone la ventana principal antes de enseñarla, y con ello se refresca. */
+    public void setComandos(Comandos comandos, EntornoPlaca entorno, PacksPlaca packs) {
         this.comandos = comandos;
         this.entorno = entorno;
+        packsPanel.setComandos(comandos, packs);
+        attach(clienteActual);
+    }
+
+    /** Se cierra: el panel de packs deja de mirar. */
+    @Override
+    public void dispose() {
+        packsPanel.cierra();
+        super.dispose();
     }
 
     /** Abre (o trae al frente) el diálogo de variables de entorno. Modeless a

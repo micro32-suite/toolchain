@@ -128,12 +128,17 @@ public final class PicoExplorer extends JPanel {
     /** V9 #876 — las variables de entorno de la placa conectada, con sus comandos (las usan los diálogos del entorno). */
     private final EntornoPlaca entorno;
     public EntornoPlaca entorno() { return entorno; }
+    /** V9 #875 — y sus packs (los usa el panel de packs de «Gestión de placa»). */
+    private final PacksPlaca packs;
+    public PacksPlaca packs() { return packs; }
 
     public PicoExplorer(Comandos comandos) {
         super(new BorderLayout());
         this.comandos = comandos;
         registraComandos();
         entorno = new EntornoPlaca(comandos, this::debugClient, this::emitLine);
+        packs = new PacksPlaca(comandos, this::debugClient, this::deviceArch, this::quePlaca,
+                this::reconectarTrasReinicio, this::emitLine);
 
         // Toolbar 3 filas: backend radio | endpoint (port/host) + connect |
         // acciones.
@@ -410,7 +415,9 @@ public final class PicoExplorer extends JPanel {
         comandos.registra("placa_borrar_log", "Clr Log", this::borraElLog)
                 .explica("Borra el log persistente de la placa.");
         comandos.registra("placa_reiniciar", "Reset", this::reinicia)
-                .explica("Reinicia el dispositivo; la conexión se cierra (para seguir, «placa_conectar»).")
+                .explica("Reinicia el dispositivo. Con «reconectar» true, espera a que vuelva (hasta 30 s) y el IDE se conecta"
+                        + " otra vez a él; sin él, la conexión se cierra (para seguir, «placa_conectar»).")
+                .parametro("reconectar", "sino", "true: espera a que vuelva y se conecta otra vez")
                 .pide(this::pideElReinicio);
         comandos.registra("placa_info", "Info", this::elInfo)
                 .explica("El INFO del dispositivo conectado: su micro, la memoria, la flash, la arquitectura, la imagen…"
@@ -1770,6 +1777,7 @@ public final class PicoExplorer extends JPanel {
         deviceArch = 0;              // H11: la arch se va con la conexión
         deviceFlagsCrc = 0; deviceReceta = "";   // #441: y la receta
         deviceMdnAbi = 0;                        // V7/H5: y la ABI de helpers
+        deviceName = "";
         setConnectedUI(false);
         rootNode.removeAllChildren();
         treeModel.reload();
@@ -2428,6 +2436,12 @@ public final class PicoExplorer extends JPanel {
         reiniciarYReconectar(false, alVolver, alFallar);
     }
 
+    /** V9 #875 — quien tiene a la vista algo de la placa con su cliente (la ventana de gestión): cuando ésta se reinicia y
+     *  el IDE la reconecta —lo pida ella, un comando o la IA—, el cliente nuevo. En el EDT. */
+    private final List<Consumer<BpvmClient>> alReconectar = new java.util.concurrent.CopyOnWriteArrayList<>();
+    public void alReconectar(Consumer<BpvmClient> quien) { alReconectar.add(quien); }
+    public void olvidaAlReconectar(Consumer<BpvmClient> quien) { alReconectar.remove(quien); }
+
     private void reiniciarYReconectar(final boolean mandarReset, Consumer<BpvmClient> alVolver,
                                       Consumer<String> alFallar) {
         if (!isConnected() || ultimoEndpoint == null || ultimaFabrica == null) {
@@ -2474,10 +2488,15 @@ public final class PicoExplorer extends JPanel {
                     despliegue.olvida();
                     setConnectedUI(true);
                     status.setText(endpoint + " — " + r[1] + " (reiniciada)");
-                    onRefresh();
-                    fetchDeviceArch();
+                    /* V9 #875 (como al conectar, #868): «ha vuelto» es cuando el IDE ha acabado lo suyo —el árbol y el
+                     * INFO—; si no, la orden siguiente de la IA se cruzaba con ellos. */
+                    CompletableFuture<Resultado> arbol = refresca();
+                    CompletableFuture<Void> arch = fetchDeviceArch();
                     if (connectedSink != null) connectedSink.accept(debugClient());
-                    alVolver.accept(debugClient());
+                    CompletableFuture.allOf(arbol, arch).whenComplete((v, ex) -> {
+                        for (Consumer<BpvmClient> q : alReconectar) q.accept(debugClient());
+                        alVolver.accept(debugClient());
+                    });
                 } catch (Exception e) {
                     Throwable c = e.getCause() != null ? e.getCause() : e;
                     String msg = c.getMessage() == null ? c.toString() : c.getMessage();
@@ -2502,6 +2521,12 @@ public final class PicoExplorer extends JPanel {
         if (!isConnected()) return listo(Resultado.mal("no hay ninguna placa conectada"));
         final Backend b = this.backend;
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        if (quiere(p, "reconectar", false)) {   // V9 #875
+            resetYReconectar(nuevo -> fin.complete(Resultado.bien("reiniciada y reconectada: " + quePlaca())
+                            .con("donde", ultimoEndpoint).con("arquitectura", archName(deviceArch))),
+                    motivo -> fin.complete(Resultado.mal("placa_reiniciar: " + motivo)));
+            return fin;
+        }
         runAsync(() -> { b.reset(); return null; },
                 v -> {
                     backend.close();
@@ -2536,9 +2561,19 @@ public final class PicoExplorer extends JPanel {
         return new Despliegue.Perfil(deviceArch, deviceFlagsCrc, deviceReceta, deviceMdnAbi);
     }
 
-    /** Lo del INFO que se guarda al conectar: la arquitectura, la receta, la ABI y la IP. */
+    /** V9 #875 — la placa conectada, como se la llama al preguntar por ella: su nombre (el del INFO) y por dónde. */
+    private volatile String deviceName = "";
+    private String quePlaca() {
+        String donde = ultimoEndpoint != null ? ultimoEndpoint : "";
+        Backend b = backend;
+        String n = !deviceName.isEmpty() ? deviceName : b != null ? b.displayName() : "";
+        return n.isEmpty() ? donde : donde.isEmpty() ? n : n + " en " + donde;
+    }
+
+    /** Lo del INFO que se guarda al conectar: el nombre, la arquitectura, la receta, la ABI y la IP. */
     private void apuntaElInfo(java.util.Map<String, Object> m) {
         if (m == null) return;
+        deviceName = istr(m, "boardName");
         long a = ilong(m, "arch");
         deviceArch = (int) a;
         /* #441 — y la receta, si el firmware la publica (V7/H2). */

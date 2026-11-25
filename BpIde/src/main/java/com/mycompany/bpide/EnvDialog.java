@@ -63,6 +63,10 @@ public final class EnvDialog extends JDialog {
         setSize(460, 340);
         setLocationRelativeTo(duenyo);
         entorno.mira(loQueHay);
+        // si se cierra su ventana (Gestión de placa), este diálogo se cierra sin pasar por dispose()
+        addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowClosed(java.awt.event.WindowEvent e) { entorno.dejaDeMirar(loQueHay); }
+        });
         refresh();
     }
 

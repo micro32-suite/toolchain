@@ -1,37 +1,32 @@
 // ============================================================
 // PacksPanel.java
-// H3 — panel de gestión de PACKS de la placa (fase 1: LIST + interior),
-// hablando PACK_LS / PACK_ENTRIES vía BpvmClient sobre la conexión YA abierta
-// (compartida con la ventana principal). Autocontenido (Swing a mano, sin
-// .form), como BoardMgrPanel.
+// H3 — panel de gestión de PACKS de la placa: la zona, sus packs y los ficheros
+// de cada uno. Autocontenido (Swing a mano, sin .form), como BoardMgrPanel.
 //
 // Retoques (Eduardo, 23-jul tras probar la v1):
-//   - al seleccionar un pack se ven los FICHEROS de dentro (PACK_ENTRIES).
+//   - al seleccionar un pack se ven los FICHEROS de dentro.
 //   - columna FECHA (la fecha de build del pack: sirve para comparar si el
 //     grabado en placa es más viejo que el recién construido en el PC).
 //   - ocupación de la zona en bytes y % (la partición se ajusta una vez;
 //     el día a día es "¿cuánto me queda?") → barra + resumen.
 //
-// Orden de fases: 1º LIST (esto) → 2º ADD/BURN → 3º REMOVE (tombstone; el
-// hueco lo recupera una compactación desde el PC).
-//
 // La tabla muestra la CADENA completa (activos Y tombstones): el tombstone
 // sigue ocupando flash hasta compactar, y verlo cuenta la verdad del espacio.
 //
-// Todas las llamadas al wire van en un thread de fondo; la UI vuelve al EDT.
+// V9 #875 (25-nov) — y ya no habla con la placa: sus botones llaman a los
+// comandos de los packs (PacksPlaca), los mismos que puede llamar la IA, y
+// enseña lo que ellos leen: si la IA graba un pack con la ventana abierta, se
+// ve, con su avance.
 // ============================================================
 package com.mycompany.bpide;
 
 import java.awt.BorderLayout;
 import java.awt.FlowLayout;
-import java.io.IOException;
-import java.time.Instant;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.concurrent.Callable;
-import java.util.function.Consumer;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -43,18 +38,20 @@ import javax.swing.JScrollPane;
 import javax.swing.JSplitPane;
 import javax.swing.JTable;
 import javax.swing.ListSelectionModel;
-import javax.swing.SwingUtilities;
 import javax.swing.table.DefaultTableCellRenderer;
 import javax.swing.table.DefaultTableModel;
 
 public final class PacksPanel extends JPanel {
 
-    private static final long T = 8000;    // timeout wire
-    private static final DateTimeFormatter FECHA_FMT =
-            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm").withZone(ZoneId.systemDefault());
+    private static final String TITULO = "Packs de la placa";
 
-    private BpvmClient client;
-    private Consumer<String> log = s -> { };
+    /** Los comandos y los packs de la placa conectada (null: sin ellos, sólo se ve vacío). */
+    private Comandos comandos;
+    private PacksPlaca packs;
+    private final PacksPlaca.Mirador mirador = new PacksPlaca.Mirador() {
+        @Override public void zona(BpvmClient.PackTable t) { fill(t); }
+        @Override public void avance(String que) { summaryLabel.setText(que); }
+    };
 
     private final JLabel summaryLabel = new JLabel("(sin conexión)");
     private final JProgressBar usageBar = new JProgressBar(0, 100);
@@ -65,7 +62,7 @@ public final class PacksPanel extends JPanel {
     };
     private final JTable packTable = new JTable(packModel);
     /** offsets de los packs listados, alineados con las filas de packModel
-     *  (el offset identifica al pack en PACK_ENTRIES — y en DEL/READ futuros). */
+     *  (el offset identifica al pack: pack_ficheros y pack_borrar). */
     private final List<Long> packOffsets = new ArrayList<>();
 
     private final DefaultTableModel fileModel = new DefaultTableModel(
@@ -74,6 +71,10 @@ public final class PacksPanel extends JPanel {
     };
     private final JTable fileTable = new JTable(fileModel);
     private final JPanel filePanel = new JPanel(new BorderLayout(4, 4));
+    private final JButton btnRefrescar = new JButton("Refrescar");
+    private final JButton btnCopiar    = new JButton("Copiar pack a la placa…");
+    private final JButton btnBorrar    = new JButton("Borrar");
+    private final JButton btnFormatear = new JButton("Formatear zona…");
 
     public PacksPanel() {
         super(new BorderLayout(4, 4));
@@ -81,39 +82,23 @@ public final class PacksPanel extends JPanel {
         buildUi();
     }
 
-    public void setLog(Consumer<String> l) { if (l != null) this.log = l; }
-
-    /** V5/H8 — de dónde sale la arquitectura de la placa (la publica el INFO y
-     *  la guarda el explorador al conectar). Se pide en vez de guardarla: entre
-     *  que se conectó y que se graba puede haber cambiado de placa. */
-    private java.util.function.IntSupplier archPlaca = () -> 0;
-    /** V7 #671 (8-oct) — tras grabar, borrar o formatear con motores ya cargados, la placa se reinicia SOLA (sus tablas
-     *  apuntaban a la zona de antes): el explorador de la ventana principal vuelve a conectar —sin mandar RESET— y la
-     *  ventana se engancha al cliente nuevo. Sin esto, se dice y se reconecta a mano. */
-    private BoardMgrPanel.Reiniciador reconectador;
-    public void setReconectador(BoardMgrPanel.Reiniciador r) { this.reconectador = r; }
-
-    /** V7 #671 — tras un cambio de la zona: si la placa dijo que se reinicia, se dice y se reconecta; si no, como
-     *  siempre, se refresca la lista. */
-    private void trasCambiarLaZona() {
-        if (client == null || !client.reiniciaTrasPack()) { refresh(); return; }
-        log.accept("[Packs] la placa tenía motores cargados y se REINICIA para cargar los de la zona nueva (#671)");
-        summaryLabel.setText("la placa se está reiniciando…");
-        if (reconectador == null) {
-            log.accept("[Packs] reconecta cuando vuelva");
-            return;
-        }
-        reconectador.reiniciar(
-            nuevo -> log.accept("[Packs] la placa ha vuelto con los motores de la zona nueva"),
-            motivo -> log.accept("[Packs] la placa no ha vuelto (" + motivo + "): reconecta a mano"));
+    /** V9 #875 — los comandos con los que trabaja. Desde ahora enseña lo que ellos lean, hasta {@link #cierra}. */
+    public void setComandos(Comandos comandos, PacksPlaca packs) {
+        this.comandos = comandos;
+        this.packs = packs;
+        btnRefrescar.setText(comandos.get("packs_listar").textoCorto());   // el texto, el de su comando
+        btnCopiar.setText(comandos.get("pack_grabar").textoCorto());
+        btnBorrar.setText(comandos.get("pack_borrar").textoCorto());
+        btnFormatear.setText(comandos.get("packs_formatear").textoCorto());
+        packs.mira(mirador);
     }
 
-    public void setArchPlaca(java.util.function.IntSupplier s) {
-        if (s != null) this.archPlaca = s;
+    /** La ventana se cierra: ya no mira. */
+    public void cierra() {
+        if (packs != null) packs.dejaDeMirar(mirador);
     }
 
     public void attach(BpvmClient c) {
-        this.client = c;
         if (c == null) { summaryLabel.setText("(sin conexión)"); clearAll(); }
         else refresh();
     }
@@ -133,18 +118,14 @@ public final class PacksPanel extends JPanel {
         });
         JPanel north = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 2));
         north.add(new JLabel("Packs de la placa:"));
-        JButton refresh = new JButton("Refrescar");
-        refresh.addActionListener(e -> refresh());
-        north.add(refresh);
-        JButton copy = new JButton("Copiar pack a la placa…");
-        copy.addActionListener(e -> onBurn());
-        north.add(copy);
-        JButton del = new JButton("Borrar");
-        del.addActionListener(e -> onDelete());
-        north.add(del);
-        JButton fmt = new JButton("Formatear zona…");
-        fmt.addActionListener(e -> onFormat());
-        north.add(fmt);
+        btnRefrescar.addActionListener(e -> refresh());
+        north.add(btnRefrescar);
+        btnCopiar.addActionListener(e -> onBurn());
+        north.add(btnCopiar);
+        btnBorrar.addActionListener(e -> onDelete());
+        north.add(btnBorrar);
+        btnFormatear.addActionListener(e -> onFormat());
+        north.add(btnFormatear);
         add(north, BorderLayout.NORTH);
 
         JPanel packPanel = new JPanel(new BorderLayout(4, 4));
@@ -187,83 +168,66 @@ public final class PacksPanel extends JPanel {
         filePanel.repaint();
     }
 
-    /** PACK_LS → repuebla la tabla + ocupación. UNSUPPORTED (placa sin zona de
-     *  packs aún) se muestra como estado, no como error a gritos. */
+    /** Un comando de los packs, con los parámetros ya dichos; su aviso, si lo hay, sobre este panel. null: sin comandos. */
+    private CompletableFuture<Resultado> manda(String id, Object... kv) {
+        if (comandos == null) { summaryLabel.setText("(sin conexión)"); return null; }
+        Map<String, Object> p = new HashMap<>();
+        for (int i = 0; i < kv.length; i += 2) p.put((String) kv[i], kv[i + 1]);
+        p.put("sobre", this);
+        return comandos.desdeLaVentana(id, p);
+    }
+
+    /** La zona: repuebla la tabla + ocupación. Una placa sin zona de packs aún se muestra como estado, no como error a
+     *  gritos. */
     public void refresh() {
-        if (client == null) { summaryLabel.setText("(sin conexión)"); return; }
+        if (comandos == null) { summaryLabel.setText("(sin conexión)"); return; }
         summaryLabel.setText("consultando…");
-        bg(() -> client.packList(T), this::fill);
+        manda("packs_listar").thenAccept(r -> { if (r.datos().containsKey("sin_zona")) clearAll(); });
     }
 
     private void fill(BpvmClient.PackTable t) {
         clearAll();
-        int alive = 0;
         for (BpvmClient.PackInfo p : t.packs) {
-            packModel.addRow(new Object[] { p.name, p.version,
-                    p.date > 0 ? FECHA_FMT.format(Instant.ofEpochSecond(p.date)) : "—",
+            packModel.addRow(new Object[] { p.name, p.version, PacksPlaca.fecha(p.date),
                     p.size / 1024L, p.files,
                     p.active ? "activo" : "borrado", p.crcOk ? "OK" : "MAL" });
             packOffsets.add(p.offset);
-            if (p.active) alive++;
         }
         long used = t.regionSize - t.free;   // ocupado = cadena entera (tombstones incluidos)
         int pct = t.regionSize > 0 ? (int) Math.round(used * 100.0 / t.regionSize) : 0;
         usageBar.setValue(t.chainOk ? pct : 100);
         usageBar.setString(t.chainOk ? ("ocupado " + pct + "%") : "CADENA CORRUPTA");
-        // #539 — los activos que no caben en la lista también cuentan; y con una
-        // imagen anterior que truncó sólo se sabe de los listados, y se dice.
-        int activos = alive + Math.max(0, t.activeOmitted);
-        boolean sinCuenta = t.omitted < 0 && t.count > t.packs.size();
-        StringBuilder s = new StringBuilder();
-        s.append(t.count).append(" packs (").append(activos)
-         .append(sinCuenta ? " activos listados) · ocupado " : " activos) · ocupado ")
-         .append(kb(used)).append(" · libre ").append(kb(t.free))
-         .append(" de ").append(kb(t.regionSize));
-        // cadena corrupta con 0 packs = zona SIN ESTRENAR (restos del uso anterior
-        // de esa flash: littlefs/FS viejo) → la salida es «Formatear zona…»
-        if (!t.chainOk) s.append(t.count == 0
-                ? "  ⚠ zona sin formatear (restos previos) → «Formatear zona…»"
-                : "  ⚠ cadena corrupta → compactar desde el PC o «Formatear zona…»");
-        if (t.count > t.packs.size()) s.append(avisoListado(t));
-        summaryLabel.setText(s.toString());
+        summaryLabel.setText(PacksPlaca.resumen(t));
     }
 
-    /** #539 — lo que el PACK_LS no lista, dicho. El device lista como mucho 16:
-     *  los activos primero y, en el hueco, los borrados más recientes; el resto lo
-     *  cuenta. Una imagen anterior no lo cuenta y listaba los 16 PRIMEROS de la
-     *  cadena, que en una placa con historia son borrados: la C5 enseñaba «19
-     *  packs (0 activos)» con dos activos grabados. */
-    private static String avisoListado(BpvmClient.PackTable t) {
-        int n = t.packs.size();
-        if (t.omitted < 0)
-            return "  ⚠ listados " + n + " de " + t.count + ": esta imagen no dice cuáles faltan"
-                 + " y pueden ser ACTIVOS (#539) → regrabar la imagen";
-        if (t.activeOmitted > 0)
-            return "  ⚠ " + t.omitted + " sin listar, " + t.activeOmitted + " de ellos ACTIVOS"
-                 + " (hay más activos de los que caben en la lista)";
-        return "  (listados " + n + ": faltan los " + t.omitted + " borrados más antiguos)";
-    }
-
-    /** Selección en la tabla de packs → PACK_ENTRIES del offset de esa fila. */
+    /** Selección en la tabla de packs → los ficheros del de esa fila. */
     private void onPackSelected() {
         int row = packTable.getSelectedRow();
         fileModel.setRowCount(0);
-        if (row < 0 || row >= packOffsets.size() || client == null) { setFilesTitle(null); return; }
-        final String name = String.valueOf(packModel.getValueAt(row, 0));
+        if (row < 0 || row >= packOffsets.size() || comandos == null) { setFilesTitle(null); return; }
         final long off = packOffsets.get(row);
-        setFilesTitle(name);
-        bg(() -> client.packEntries(off, T), entries -> {
+        setFilesTitle(String.valueOf(packModel.getValueAt(row, 0)));
+        manda("pack_ficheros", "offset", off).thenAccept(r -> {
+            Object fs = r.datos().get("ficheros");
+            if (!(fs instanceof List)) return;
+            Object total = r.datos().get("total");
+            int n = ((List<?>) fs).size();
+            if (total instanceof Integer && (Integer) total > n) {   // la placa no los lista todos
+                filePanel.setBorder(BorderFactory.createTitledBorder("Ficheros de '" + r.datos().get("pack")
+                        + "' (los " + n + " primeros de " + total + ")"));
+                filePanel.repaint();
+            }
             fileModel.setRowCount(0);
-            for (BpvmClient.PackEntry e : entries)
-                fileModel.addRow(new Object[] { e.nombre + "." + e.tipo, e.tipo, e.size });
+            for (Object o : (List<?>) fs) {
+                Map<?, ?> e = (Map<?, ?>) o;
+                fileModel.addRow(new Object[] { e.get("nombre"), e.get("tipo"), e.get("bytes") });
+            }
         });
     }
 
-    /** "Copiar pack a la placa…": elige un .pack (por defecto el último dir) y
-     *  lo graba por chunks (PACK_BURN_*). El device verifica en flash antes de
-     *  activar; aquí solo se informa del resultado y se refresca la lista. */
+    /** "Copiar pack a la placa…": elige un .pack (por defecto el último dir) y lo graba. */
     private void onBurn() {
-        if (client == null) { summaryLabel.setText("(sin conexión)"); return; }
+        if (comandos == null) { summaryLabel.setText("(sin conexión)"); return; }
         javax.swing.JFileChooser fc = new javax.swing.JFileChooser(lastBurnDir);
         fc.setDialogTitle("Copiar pack a la placa");
         fc.setFileFilter(new javax.swing.filechooser.FileNameExtensionFilter("Packs (*.pack)", "pack"));
@@ -271,251 +235,35 @@ public final class PacksPanel extends JPanel {
         grabarPack(fc.getSelectedFile());
     }
 
-    /** #435 — LA GRABACIÓN, separada de cómo se ELIGE el fichero. La elección
-     *  ya no es sólo el chooser: el panel de carpetas de {@link BoardMgrPanel}
-     *  manda aquí el `.pack` seleccionado con el botón «Añadir». Un solo camino
-     *  de grabado para las dos entradas — si fueran dos, el día que cambie la
-     *  poda o el relocalizado se arreglaría uno y el otro se quedaría atrás. */
-    /** [V7/H2, #493] Los packs que este pack declara necesitar (`requires-pack=`
-     *  del manifest) y que la placa no tiene grabados, al log. */
-    private void avisarPacksRequeridos(byte[] img) {
-        try {
-            basicplus.pack.PackReader.Pack p = basicplus.pack.PackReader.read(img);
-            String manifest = null;
-            for (basicplus.pack.PackEntry e : p.entries) {
-                if (basicplus.pack.PackFormat.TYPE_MANIFEST.equals(e.tipo)
-                        && basicplus.pack.PackFormat.MANIFEST_NAME.equals(e.nombre))
-                    manifest = new String(e.data, java.nio.charset.StandardCharsets.UTF_8);
-            }
-            if (manifest == null) return;
-            java.util.List<String> requiere = new java.util.ArrayList<>();
-            for (String linea : manifest.split("\n")) {
-                linea = linea.trim();
-                if (linea.startsWith("requires-pack="))
-                    for (String r : linea.substring("requires-pack=".length()).split(","))
-                        if (!r.trim().isEmpty()) requiere.add(r.trim());
-            }
-            if (requiere.isEmpty()) return;
-            BpvmClient.PackTable t = client.packList(T);
-            java.util.Set<String> grabados = new java.util.HashSet<>();
-            for (BpvmClient.PackInfo pi : t.packs) if (pi.active) grabados.add(pi.name);
-            for (String r : requiere) {
-                if (grabados.contains(r)) continue;
-                /* #539 — «no está en la lista» sólo es «no está grabado» si la lista
-                 * trae TODOS los activos; si no, decirlo sería afirmar lo que no se
-                 * sabe (con la imagen vieja, la C5 lo habría dicho de Gui). */
-                log.accept("[Packs] AVISO: '" + p.nombre + "' declara requires-pack=" + r
-                    + (t.activosCompletos()
-                       ? " y la placa no tiene ese pack grabado: grabalo tambien, o el RUN dira que falta un modulo\n"
-                       : " y no esta entre los activos que lista la placa, pero la lista no los trae todos"
-                         + " (#539): puede estar grabado; si el RUN dice que falta un modulo, grabalo\n"));
-            }
-        } catch (Exception e) {
-            /* Un pack que no se deja leer lo dirá el grabado, no este aviso. */
-        }
-    }
-
-    /** [V7 #623, 8-oct] Un pack LIBRERÍA ya no lleva la stdlib: la saca la placa del Stdlib.pack (XIP) o de
-     *  /lib (a la RAM; en la C6 no cabe la GUI). Si este pack usa módulos de la stdlib que no lleva y que la
-     *  PLACA NO TIENE —STAT por nombre: ni en el FS ni en un pack—, se dice cuáles, y se graba igual. Sólo
-     *  ésos: decir «usa Core» de cada pack en una placa sin el Stdlib.pack sería un aviso que salta siempre
-     *  (Core está en toda imagen). Cuáles son de la stdlib lo dice la carpeta `stdlibDir` del BpVM.cfg más
-     *  cercano al pack (sin cfg, todos los que importa y no lleva). */
-    private void avisarStdlib(byte[] img, java.io.File f) {
-        try {
-            basicplus.pack.PackReader.Pack p = basicplus.pack.PackReader.read(img);
-            java.nio.file.Path sdir = null;
-            try {
-                edu.bpgenvm.config.VmConfig cfg = edu.bpgenvm.config.VmConfig.loadDefaultFor(
-                        f.getAbsoluteFile().getParentFile().toPath());
-                if (cfg.sourcePath == null || cfg.stdlibDir == null || cfg.stdlibDir.isEmpty())
-                    cfg = IdePrefs.cfgPara(null);   // V9 #867: el del cwd, y sin él, el de la instalación
-                if (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty())
-                    sdir = java.nio.file.Paths.get(cfg.stdlibDir);
-            } catch (Throwable sinCfg) { /* sin cfg: cuenta todo lo que importa y no lleva */ }
-            java.util.List<String> usa = basicplus.frontend.PackStep.stdlibQueImporta(p.entries, sdir);
-            java.util.List<String> faltan = new java.util.ArrayList<>();
-            for (String m : usa) if (client.statModule(m + ".mod", null, T) == null) faltan.add(m);
-            if (faltan.isEmpty()) return;
-            String lo = faltan.size() == 1 ? "lo" : "los";
-            log.accept("[Packs] AVISO: '" + p.nombre + "' usa " + String.join(", ", faltan) + " de la stdlib, no " + lo
-                + " lleva (un pack libreria no lleva la stdlib, #623) y la placa no " + lo + " tiene: graba tambien el"
-                + " Stdlib.pack, o el RUN " + lo + " subira a /lib (a la RAM)\n");
-        } catch (Exception e) {
-            /* Un pack que no se deja leer lo dirá el grabado, no este aviso. */
-        }
-    }
-
+    /** #435 — la grabación, separada de cómo se ELIGE el fichero: el panel de carpetas de {@link BoardMgrPanel} manda aquí
+     *  el `.pack` seleccionado con el botón «Añadir». Un solo camino de grabado para las dos entradas (y, desde #875, para
+     *  la IA: el comando). */
     public void grabarPack(final java.io.File f) {
-        if (client == null) { summaryLabel.setText("(sin conexión)"); return; }
         if (f == null || !f.isFile()) { summaryLabel.setText("(no es un fichero)"); return; }
         lastBurnDir = f.getParentFile();
-        summaryLabel.setText("grabando " + f.getName() + "…");
-        bg(() -> {
-            byte[] img = java.nio.file.Files.readAllBytes(f.toPath());
-
-            /* ── [V7/H2, #493] `requires-pack=`: SE LEE AQUÍ, al grabar ─────
-             *
-             * El manifest lo escribe el compilador (los `import ... from pack X`
-             * que vio) y nadie lo leía. El único que puede comprobarlo es el
-             * IDE con la placa delante: el PC no sabe qué hay grabado y las VMs
-             * no pueden (miVM no tiene zona de packs: avisaría siempre y nunca
-             * igual que la VM-C). Si falta, se avisa y se graba igual — un
-             * pack es autocontenido salvo por estos (Eduardo: «como un docker
-             * ... salvo SQLite u otros similares»). */
-            avisarPacksRequeridos(img);
-            avisarStdlib(img, f);                    /* V7 #623: y la stdlib que no lleva */
-
-            /* ── V5/H8: EL PACK SE PREPARA PARA ESTA PLACA ──────────────────
-             *
-             * Un pack universal trae el motor de VARIAS familias. Aquí se poda
-             * a la de esta placa, y el motor que quede se relocaliza para la
-             * direccion REAL — que no se sabe hasta que el device elige el
-             * hueco, o sea DENTRO de packBurn, entre el BEGIN y los datos.
-             *
-             * Si el pack no lleva motor nativo esto no hace nada: `podar`
-             * devuelve el mismo contenido y `sellar` lo pasa tal cual. */
-            final basicplus.frontend.PackBurn.Preparado prep = prepararParaLaPlaca(img);
-            byte[] aGrabar = (prep != null) ? prep.bytes : img;
-
-            // El avance va a la MISMA etiqueta que ya dice "grabando…": es donde
-            // el usuario está mirando. Y se pinta en el hilo de Swing, que es de
-            // donde NO viene esta llamada (esto corre en el hilo de fondo).
-            long off = client.packBurn(aGrabar, 30000,
-                (flashAddr, ramBase, ramSize) -> {
-                    if (prep == null || !prep.necesitaDireccion) return aGrabar;
-                    int codigo = basicplus.frontend.PackBurn.baseDelCodigo(prep, (int) flashAddr);
-                    log.accept(String.format(
-                        "[Packs] pack en 0x%08X · motor en 0x%08X · RAM 0x%08X (%d KB)"
-                        + " — relocalizando %d sitio(s)%n",
-                        flashAddr, codigo, ramBase, ramSize / 1024, prep.relocalizaciones));
-                    try {
-                        /* V7/H6.c G1: con `ramSize`, un motor que no cabe se dice AQUÍ,
-                         * antes de mandar un byte — no al cargarlo. */
-                        return basicplus.frontend.PackBurn.sellar(prep, codigo, (int) ramBase, ramSize);
-                    } catch (basicplus.frontend.PackBurn.BurnException be) {
-                        throw new java.io.IOException(be.getMessage(), be);
-                    }
-                },
-                (hechos, total) -> {   // T holgado: borra+programa
-                final int pct = total > 0 ? (int) ((hechos * 100L) / total) : 0;
-                javax.swing.SwingUtilities.invokeLater(() -> summaryLabel.setText(
-                        "grabando " + f.getName() + "… " + pct + " %"
-                        + "  (" + (hechos / 1024) + "/" + (total / 1024) + " KB)"));
-            });
-            /* Lo GRABADO, no el fichero de origen. Con la poda ya no son lo
-             * mismo (1.122.304 en disco → 569.344 en la placa), y un log que
-             * dijera el del fichero contradiría al panel de packs, que lee de
-             * la flash. Dos instrumentos discrepando es peor que ninguno: hoy
-             * mismo el tamaño ha sido el dato que distinguía qué IDE grababa. */
-            return new Object[] { aGrabar.length, off, img.length };
-        }, r -> {
-            log.accept("[Packs] grabado " + f.getName() + " (" + r[0] + " B"
-                    + (((Integer) r[2]).intValue() != ((Integer) r[0]).intValue()
-                       ? " — podado de " + r[2] + " para esta placa" : "")
-                    + ") en offset " + r[1]);
-            trasCambiarLaZona();   /* V7 #671 */
-        });
+        manda("pack_grabar", "fichero", f.getAbsolutePath());
     }
 
-    /**
-     * V5/H8 — deja el pack con lo de ESTA placa: poda las familias que no son y
-     * prepara el motor para sellarlo cuando se sepa la dirección.
-     *
-     * <p>Devuelve null si no hay que tocar nada (pack sin familias). Un fallo NO
-     * se traga: grabar un pack a medias es peor que no grabarlo, y el mensaje
-     * de `PackBurn` ya dice qué pasa y qué hacer.
-     */
-    private basicplus.frontend.PackBurn.Preparado prepararParaLaPlaca(byte[] img)
-            throws java.io.IOException {
-        /* La familia la dice la PLACA, igual que en la pasada AOT: un desplegable
-         * del IDE podría estar puesto en otra cosa, y el motor equivocado no da
-         * error — da un salto a un sitio que no es.
-         *
-         * Y si el explorador todavía no la tiene, SE LA PEDIMOS. El valor se
-         * cachea al conectar mediante una petición ASÍNCRONA, así que puede no
-         * haber llegado —o venir de otra placa anterior—. Depender de ese
-         * cacheo es una carrera; preguntar aquí no lo es, y estamos en el hilo
-         * de fondo con la conexión abierta, que es el sitio para hacerlo. */
-        int a = archPlaca.getAsInt();
-        if (a == 0 && client != null) {
-            java.util.Map<String, Object> inf;
-            try {
-                inf = client.getInfo(T);
-            } catch (java.io.IOException io) {
-                /* NO es lo mismo «no lo tengo cacheado» que «la placa no
-                 * contesta», y mandan a sitios distintos: reconectar el
-                 * explorador no arregla un wire caído. Decir cuál es. */
-                throw new java.io.IOException("la placa no responde al INFO ("
-                    + io.getMessage() + "). Sin eso no se puede saber qué motor"
-                    + " grabar. Resetea la placa y vuelve a conectar; comprueba"
-                    + " con el botón INFO antes de grabar.", io);
-            }
-            Object v = (inf != null) ? inf.get("arch") : null;
-            /* Número O cadena, igual que `PicoExplorer.ilong`: el wire manda
-             * JSON y según el camino un entero puede llegar de las dos formas.
-             * Aceptar sólo una lo dejaría a 0 EN SILENCIO. */
-            if (v instanceof Number) a = ((Number) v).intValue();
-            else if (v != null) {
-                try { a = Integer.parseInt(v.toString().trim()); }
-                catch (NumberFormatException ignore) { }
-            }
-            if (a != 0) log.accept("[Packs] la placa dice arch=" + a
-                    + " (" + PicoExplorer.archName(a) + ")\n");
-        }
-        String arch = PicoExplorer.archName(a);
-        basicplus.frontend.NpackReloc.Destino d =
-                basicplus.frontend.NpackReloc.porTargetAot(arch);
-        /* Arquitectura desconocida o sin motor nativo (p.ej. el Xtensa del S3):
-         * NO es motivo para negarse a grabar. Decision de Eduardo (22-ago):
-         * *«lleve nativo o no, el pack se graba; lo unico, si el nativo no existe
-         * o no se corresponde con el del micro, se graba SIN nativo»*. Se pasa
-         * `null` como destino y `podar` se lleva por delante todo lo nativo,
-         * avisando de lo que ha quitado.
-         *
-         * Hasta hoy esto LANZABA, y encima aconsejaba RECONECTAR — que en el caso
-         * del S3 no podia funcionar nunca: por muchas veces que reconectes, el
-         * micro sigue siendo Xtensa. Lo vio Eduardo con una DevKit. */
-        if (d == null) {
-            log.accept("[Packs] la placa es '"
-                + (arch.isEmpty() ? "(no la dice)" : arch)
-                + "': no hay motor nativo para ella, se grabara SIN nativo\n");
-        }
-        try {
-            basicplus.frontend.PackBurn.Preparado prep =
-                    basicplus.frontend.PackBurn.podar(img, d);
-            for (String s : prep.detalle) log.accept("[Packs] " + s + "\n");
-            return prep;
-        } catch (basicplus.frontend.PackBurn.BurnException be) {
-            throw new java.io.IOException(be.getMessage(), be);
-        }
-    }
-
-    /** "Borrar" = fase 3, tombstone del pack seleccionado: se MARCA borrado
-     *  (no se borra); el espacio se recupera compactando desde el PC. */
+    /** "Borrar" = tombstone del pack seleccionado: se MARCA borrado (no se borra); el espacio se recupera compactando. */
     private void onDelete() {
         int row = packTable.getSelectedRow();
-        if (row < 0 || row >= packOffsets.size() || client == null) {
-            JOptionPane.showMessageDialog(this, "Selecciona un pack de la lista.",
-                    "Packs de la placa", JOptionPane.INFORMATION_MESSAGE);
+        if (row < 0 || row >= packOffsets.size() || comandos == null) {
+            JOptionPane.showMessageDialog(this, "Selecciona un pack de la lista.", TITULO,
+                    JOptionPane.INFORMATION_MESSAGE);
             return;
         }
         final String name = String.valueOf(packModel.getValueAt(row, 0));
         if ("borrado".equals(String.valueOf(packModel.getValueAt(row, 5)))) {
-            JOptionPane.showMessageDialog(this, "'" + name + "' ya está borrado.",
-                    "Packs de la placa", JOptionPane.INFORMATION_MESSAGE);
+            JOptionPane.showMessageDialog(this, "'" + name + "' ya está borrado.", TITULO,
+                    JOptionPane.INFORMATION_MESSAGE);
             return;
         }
-        final long off = packOffsets.get(row);
         int ok = JOptionPane.showConfirmDialog(this,
                 "¿Marcar '" + name + "' como borrado?\n"
                 + "(No se borra de la flash: el espacio se recupera compactando desde el PC.)",
                 "Borrar pack", JOptionPane.YES_NO_OPTION);
         if (ok != JOptionPane.YES_OPTION) return;
-        bg(() -> { client.packDel(off, 30000); return null; }, r -> {
-            log.accept("[Packs] '" + name + "' marcado como borrado (offset " + off + ")");
-            trasCambiarLaZona();   /* V7 #671 */
-        });
+        manda("pack_borrar", "offset", packOffsets.get(row));
     }
 
     /** "Formatear zona…": borra la zona de packs ENTERA. Es el estreno de una
@@ -523,7 +271,7 @@ public final class PacksPanel extends JPanel {
      *  la ve corrupta, correctamente) o la recuperación de una cadena rota.
      *  Confirmación explícita SIEMPRE — borra todos los packs. */
     private void onFormat() {
-        if (client == null) { summaryLabel.setText("(sin conexión)"); return; }
+        if (comandos == null) { summaryLabel.setText("(sin conexión)"); return; }
         int ok = JOptionPane.showConfirmDialog(this,
                 "Esto BORRA TODOS los packs de la placa (la zona entera).\n"
                 + "Es lo correcto para estrenar una zona recién particionada\n"
@@ -531,39 +279,8 @@ public final class PacksPanel extends JPanel {
                 + "¿Formatear la zona de packs?",
                 "Formatear zona de packs", JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE);
         if (ok != JOptionPane.YES_OPTION) return;
-        summaryLabel.setText("formateando zona de packs…");
-        bg(() -> { client.packFormat(30000); return null; }, r -> {
-            log.accept("[Packs] zona de packs formateada");
-            trasCambiarLaZona();   /* V7 #671 */
-        });
+        manda("packs_formatear");
     }
-
-    // ---- helpers ----
 
     private static java.io.File lastBurnDir = null;   // recordar carpeta entre usos
-
-    private static String kb(long bytes) { return (bytes / 1024L) + " KB"; }
-
-    private <R> void bg(Callable<R> work, Consumer<R> ok) {
-        new Thread(() -> {
-            try {
-                R res = work.call();
-                SwingUtilities.invokeLater(() -> ok.accept(res));
-            } catch (Exception e) {
-                SwingUtilities.invokeLater(() -> {
-                    String m = e instanceof IOException ? e.getMessage() : String.valueOf(e);
-                    // sin zona de packs (estado < particiones) es un estado normal, no un pop-up
-                    if (m != null && m.contains("sin zona de packs")) {
-                        clearAll();
-                        summaryLabel.setText("la placa no expone packs (configura las particiones primero)");
-                        return;
-                    }
-                    log.accept("[Packs] error: " + m);
-                    summaryLabel.setText("error");
-                    JOptionPane.showMessageDialog(this, m, "Packs de la placa",
-                            JOptionPane.ERROR_MESSAGE);
-                });
-            }
-        }, "packs-wire").start();
-    }
 }

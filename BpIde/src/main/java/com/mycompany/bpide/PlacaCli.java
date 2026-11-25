@@ -9,6 +9,7 @@
 //   bp run --placa=COM22 X.bp        (o =192.168.1.53: una placa en la red)
 //   bp run --sim X.bp
 //   bp placa <COMx|ip|sim> ls [ruta] | get <ruta> [fichero] | stop | info
+//   bp placa <COMx|ip|sim> packs | pack <fichero.pack|nombre>          (V9 #875)
 //
 // La salida del programa, a la estándar; lo demás (la subida, el simulado, la
 // traza), a la de errores. `bp run` sale con el código del programa; `bp placa`,
@@ -180,7 +181,8 @@ public final class PlacaCli {
     /** `bp placa <destino> <orden> …`: lo de la placa que no es ejecutar. 0 si va bien; 1 si no. */
     public static int placa(String[] args) {
         if (args.length < 2) {
-            err("bp placa: dime la placa (COM22, una IP o sim) y qué hacer: ls [ruta], get <ruta> [fichero], stop o info");
+            err("bp placa: dime la placa (COM22, una IP o sim) y qué hacer: ls [ruta], get <ruta> [fichero], stop, info,"
+                    + " packs o pack <fichero.pack|nombre>");
             return 1;
         }
         String destino = args[0];
@@ -224,8 +226,53 @@ public final class PlacaCli {
                     }
                     return 0;
                 }
+                case "packs": {   // V9 #875: los que tiene grabados, y el resumen de la zona
+                    BpvmClient dc = c.cliente();
+                    if (dc == null) { err("bp placa packs: este destino no tiene zona de packs"); return 1; }
+                    BpvmClient.PackTable t = dc.packList(8000);
+                    for (BpvmClient.PackInfo pi : t.packs) {
+                        System.out.println(String.format("%9d  %-8s %s  %s%s%s", pi.size, pi.active ? "activo" : "retirado",
+                                PacksPlaca.fecha(pi.date), pi.name, pi.version.isEmpty() ? "" : " " + pi.version,
+                                pi.crcOk ? "" : "  CRC MAL"));
+                    }
+                    System.out.println(PacksPlaca.resumen(t));
+                    return 0;
+                }
+                case "pack": {   // V9 #875 — grabar uno: un fichero, o uno de la instalación por su nombre
+                    BpvmClient dc = c.cliente();
+                    if (dc == null) { err("bp placa pack: este destino no tiene zona de packs"); return 1; }
+                    if (args.length < 3) {
+                        err("bp placa pack: ¿cuál? (un .pack, o uno de la instalación: "
+                                + String.join(", ", PacksPlaca.losDeLaInstalacion()) + ")");
+                        return 1;
+                    }
+                    File f = new File(args[2]);
+                    if (!f.isFile()) f = PacksPlaca.deLaInstalacion(args[2]);
+                    if (f == null) {
+                        err("bp placa pack: no existe el fichero «" + args[2] + "» ni hay un pack con ese nombre en la"
+                                + " instalación (" + String.join(", ", PacksPlaca.losDeLaInstalacion()) + ")");
+                        return 1;
+                    }
+                    final int[] dicho = { -10 };
+                    PacksPlaca.Grabado g = PacksPlaca.graba(dc, f, 0, PlacaCli::err, (hechos, total) -> {
+                        int pct = total > 0 ? (int) ((hechos * 100L) / total) : 100;
+                        if (pct < dicho[0] + 10) return;
+                        dicho[0] = pct;
+                        err("[Packs] grabando " + args[2] + "… " + pct + " %");
+                    });
+                    System.out.println("grabado: " + g.nombre + " (" + g.bytes + " bytes"
+                            + (g.delFichero != g.bytes ? ", podado de " + g.delFichero + " para esta placa" : "") + ")");
+                    for (BpvmClient.PackInfo pi : g.habia) {
+                        err("[Packs] ya había otro '" + pi.name + "' activo (del " + PacksPlaca.fecha(pi.date) + "): manda el"
+                                + " que se acaba de grabar; el viejo se retira desde el IDE");
+                    }
+                    if (dc.reiniciaTrasPack()) {
+                        err("[Packs] la placa tenía motores cargados y se reinicia para cargar los de la zona nueva");
+                    }
+                    return 0;
+                }
                 default:
-                    err("bp placa: no conozco «" + orden + "» (ls, get, stop o info)");
+                    err("bp placa: no conozco «" + orden + "» (ls, get, stop, info, packs o pack)");
                     return 1;
             }
         } catch (IOException ex) {

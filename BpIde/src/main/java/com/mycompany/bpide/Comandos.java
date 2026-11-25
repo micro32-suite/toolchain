@@ -59,6 +59,8 @@ public final class Comandos {
         private Supplier<Map<String, Object>> pideALaVentana = HashMap::new;
         /** El comando ES su diálogo (una configuración, la gestión de la placa…): sólo desde la ventana. */
         private boolean soloVentana;
+        /** V9 #875 — lo que se le pregunta a la persona antes de hacerlo por su nombre (la IA); null: nada. */
+        private Function<Map<String, Object>, CompletableFuture<String>> pregunta;
 
         private Comando(String id, String texto, Function<Map<String, Object>, CompletableFuture<Resultado>> logica) {
             this.id = id;
@@ -100,6 +102,13 @@ public final class Comandos {
         public Comando pide(Supplier<Map<String, Object>> s) { this.pideALaVentana = s; return this; }
         /** El comando es su propio diálogo: llamado por su nombre, un resultado que lo dice (no abre nada). */
         public Comando soloVentana() { this.soloVentana = true; return this; }
+        /** V9 #875 (Eduardo, 25-nov: «1) si») — lo que no se deshace: llamado por su nombre (la IA), antes se le pregunta a
+         *  la persona que usa el IDE, con lo que va a pasar (`texto`, de sus parámetros; null: no hay qué preguntar, y
+         *  sigue) y «No» por defecto. Desde la ventana no: su botón ya pregunta lo suyo. */
+        public Comando pregunta(Function<Map<String, Object>, CompletableFuture<String>> texto) {
+            this.pregunta = texto;
+            return this;
+        }
 
         public String texto() { return texto; }
         public String textoCorto() { return textoCorto; }
@@ -157,8 +166,9 @@ public final class Comandos {
 
     /**
      * Ejecuta un comando por su nombre, desde cualquier hilo, con sus parámetros: la lógica, en el EDT; el resultado,
-     * cuando acabe. Nunca abre un diálogo: lo que la ventana avisaría, va en el resultado. Un nombre que no existe, o
-     * una lógica que revienta, también es un resultado (mal), no una excepción.
+     * cuando acabe. Nunca abre un diálogo (lo que la ventana avisaría, va en el resultado), salvo el de un comando que
+     * no se deshace: ése se lo pregunta antes a la persona ({@link Comando#pregunta}). Un nombre que no existe, o una
+     * lógica que revienta, también es un resultado (mal), no una excepción.
      */
     public CompletableFuture<Resultado> ejecuta(String id, Map<String, Object> parametros) {
         Comando c = porId.get(id);
@@ -169,7 +179,47 @@ public final class Comandos {
             return CompletableFuture.completedFuture(Resultado.mal("'" + id + "' abre un diálogo de la ventana: sólo se"
                     + " usa desde la ventana"));
         }
-        return corre(c, parametros);
+        return c.pregunta != null ? trasPreguntar(c, parametros) : corre(c, parametros);
+    }
+
+    /** V9 #875 — quien pregunta a la persona: sí o no. El de verdad, un diálogo sobre la ventana; una prueba pone el suyo. */
+    private java.util.function.Predicate<String> preguntador = this::preguntaALaPersona;
+
+    void setPreguntador(java.util.function.Predicate<String> p) { preguntador = p; }
+
+    /** El diálogo: lo que va a pasar, y «No» por defecto (un Intro sin mirar no autoriza nada). En el EDT. */
+    private boolean preguntaALaPersona(String texto) {
+        Object[] opciones = { "Sí, adelante", "No" };
+        if (ventana instanceof java.awt.Window) ((java.awt.Window) ventana).toFront();
+        return JOptionPane.showOptionDialog(ventana, texto + "\n\n¿La dejas?", "La IA pide permiso",
+                JOptionPane.YES_NO_OPTION, JOptionPane.WARNING_MESSAGE, null, opciones, opciones[1]) == 0;
+    }
+
+    /** Un comando que se pregunta: el texto de la pregunta (puede tardar: lee la placa), la respuesta de la persona y, con
+     *  un sí, el comando. */
+    private CompletableFuture<Resultado> trasPreguntar(Comando c, Map<String, Object> parametros) {
+        final Map<String, Object> p = parametros != null ? parametros : Collections.<String, Object>emptyMap();
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        Runnable empieza = () -> {
+            CompletableFuture<String> t;
+            try {
+                t = c.pregunta.apply(p);
+            } catch (Throwable e) {
+                fin.complete(Resultado.mal(c.id + ": " + causa(e)));
+                return;
+            }
+            t.whenComplete((texto, ex) -> SwingUtilities.invokeLater(() -> {
+                if (ex != null) fin.complete(Resultado.mal(c.id + ": " + causa(ex)));
+                else if (texto != null && !preguntador.test(texto)) {
+                    fin.complete(Resultado.mal(c.id + ": la persona que usa el IDE no lo ha autorizado"));
+                } else {
+                    corre(c, p).thenAccept(fin::complete);
+                }
+            }));
+        };
+        if (SwingUtilities.isEventDispatchThread()) empieza.run();
+        else SwingUtilities.invokeLater(empieza);
+        return fin;
     }
 
     /** Corre la lógica de un comando en el EDT; el resultado, cuando acabe (lo de {@link #ejecuta}, sin mirar si es

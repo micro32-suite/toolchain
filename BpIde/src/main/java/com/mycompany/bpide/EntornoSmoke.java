@@ -176,24 +176,20 @@ public final class EntornoSmoke {
         ServidorIa ia = new ServidorIa(cs, s -> { }, 20000);
         ia.arranca(PUERTO_IA, Files.createTempDirectory("ia"));
         try {
-            Map<String, Object> lista = pide("tools/list", new HashMap<>());
-            List<String> nombres = new ArrayList<>();
-            for (Object o : (List<?>) ((Map<?, ?>) lista.get("result")).get("tools")) {
-                nombres.add(String.valueOf(((Map<?, ?>) o).get("name")));
-            }
+            List<String> nombres = herramientas(PUERTO_IA);
             mira(nombres.contains("entorno_listar") && nombres.contains("entorno_poner")
                     && nombres.contains("entorno_borrar"), "la IA ve las tres: " + nombres);
-            Map<?, ?> rr = llama("entorno_poner", p("clave", "display", "valor", "st7701"));
+            Map<?, ?> rr = llama(PUERTO_IA, "entorno_poner", p("clave", "display", "valor", "st7701"));
             mira(Boolean.FALSE.equals(rr.get("isError")) && "st7701".equals(cli.envGet("display", 8000)),
                     "la IA pone una: " + rr.get("content"));
-            rr = llama("entorno_poner", p("clave", "display", "valor", "x", "sobre", "algo"));
+            rr = llama(PUERTO_IA, "entorno_poner", p("clave", "display", "valor", "x", "sobre", "algo"));
             mira(Boolean.TRUE.equals(rr.get("isError")) && "st7701".equals(cli.envGet("display", 8000)),
                     "lo que es de la ventana no lo puede pasar: " + rr.get("content"));
-            rr = llama("entorno_poner", p("clave", "display"));
+            rr = llama(PUERTO_IA, "entorno_poner", p("clave", "display"));
             mira(Boolean.TRUE.equals(rr.get("isError")), "sin el valor, no: " + rr.get("content"));
-            rr = llama("entorno_poner", p("clave", "part.packs.size", "valor", "1"));
+            rr = llama(PUERTO_IA, "entorno_poner", p("clave", "part.packs.size", "valor", "1"));
             mira(Boolean.TRUE.equals(rr.get("isError")), "las de las particiones, tampoco: " + rr.get("content"));
-            rr = llama("entorno_borrar", p("clave", "display"));
+            rr = llama(PUERTO_IA, "entorno_borrar", p("clave", "display"));
             mira(Boolean.FALSE.equals(rr.get("isError")), "y la borra: " + rr.get("content"));
         } finally {
             ia.para();
@@ -236,21 +232,31 @@ public final class EntornoSmoke {
         return null;
     }
 
-    private static Map<?, ?> llama(String nombre, Map<String, Object> argumentos) throws Exception {
+    /** Las herramientas que ve la IA en ese servidor. (También las usa PacksSmoke.) */
+    static List<String> herramientas(int puerto) throws Exception {
+        List<String> nombres = new ArrayList<>();
+        Map<String, Object> lista = pide(puerto, "tools/list", new HashMap<>());
+        for (Object o : (List<?>) ((Map<?, ?>) lista.get("result")).get("tools")) {
+            nombres.add(String.valueOf(((Map<?, ?>) o).get("name")));
+        }
+        return nombres;
+    }
+
+    static Map<?, ?> llama(int puerto, String nombre, Map<String, Object> argumentos) throws Exception {
         Map<String, Object> params = new HashMap<>();
         params.put("name", nombre);
         params.put("arguments", argumentos);
-        return (Map<?, ?>) pide("tools/call", params).get("result");
+        return (Map<?, ?>) pide(puerto, "tools/call", params).get("result");
     }
 
     @SuppressWarnings("unchecked")
-    private static Map<String, Object> pide(String metodo, Map<String, Object> params) throws Exception {
+    private static Map<String, Object> pide(int puerto, String metodo, Map<String, Object> params) throws Exception {
         Map<String, Object> m = new HashMap<>();
         m.put("jsonrpc", "2.0");
         m.put("id", 1);
         m.put("method", metodo);
         m.put("params", params);
-        HttpURLConnection c = (HttpURLConnection) new URL("http://127.0.0.1:" + PUERTO_IA + "/mcp").openConnection();
+        HttpURLConnection c = (HttpURLConnection) new URL("http://127.0.0.1:" + puerto + "/mcp").openConnection();
         c.setRequestMethod("POST");
         c.setDoOutput(true);
         c.setRequestProperty("Content-Type", "application/json");

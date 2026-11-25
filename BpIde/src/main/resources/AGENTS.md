@@ -74,6 +74,8 @@ bp placa COM22 ls              # its files, with their size (also: bp placa sim 
 bp placa COM22 get X.shot      # download one, with its path as ls prints it
 bp placa COM22 info            # which board it is: name, architecture, memory, flash, pins…
 bp placa COM22 stop            # stop the program running on it
+bp placa COM22 packs           # the packs burnt on it (libraries and engines), and the room left
+bp placa COM22 pack Stdlib     # burn one: this installation's, by its name, or a .pack (its flash: ask the user first)
 ```
 
 - Output and exit code as on the PC: on stdout only what the program prints; on stderr what was uploaded, and the
@@ -97,13 +99,20 @@ code. Files on the PC: only inside the folder the user allowed.
   `[ia] servidor para la IA en …` if allowed, another `[ia] …` line if not. Then connect (or reconnect).
 - **A board keeps its standard library** (its `Stdlib.pack`), and the IDE does not upload a library the board already
   has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's library is
-  older than this installation's: tell the user to burn this installation's packs on the board (IDE, Packs panel;
-  `@INSTALACION@docs/INSTALAR_FIRMWARE.md`).
+  older than this installation's: ask the user to let you burn this installation's `Stdlib` on it (`pack_grabar`), and
+  then retire the old one (`pack_borrar`, with its `offset`, from `habia`).
+- **The board's packs** (a zone of its flash with its libraries and engines: `Stdlib`, `Gui`, `SQLite`…): `packs_listar`,
+  `pack_ficheros`, `pack_grabar` (one of this installation's, by its name, or a `.pack`), `pack_borrar` (retires it: its
+  room comes back only by formatting) and `packs_formatear` (empties the zone; the IDE asks the user first, every time).
+  With engines already loaded the board reboots: the tool ends when it is back and connected. An engine (the GUI,
+  SQLite) needs its RAM block (`packRam` or `SQLite`, in the environment) and the board rebooted BEFORE it is burnt.
+  Which packs each board takes, in which order and with which settings: `@INSTALACION@docs/en/INSTALAR_FIRMWARE.md`,
+  "The board's packs". They are the board's, not the program's: ask the user before changing them.
 - **The board's settings** (its environment variables: the memory for its packs, the panel, the SD card, the radio…)
   live in its flash, outside its files: `entorno_listar`, `entorno_poner` and `entorno_borrar`. Which ones there are, and
   their values for each board: appendix A of the reference. Most are read when the board starts: after changing one,
-  `placa_reiniciar` and `placa_conectar`. They are the board's, not the program's: change only what the task needs, and
-  tell the user what there was (`antes`, in the result).
+  `placa_reiniciar` with `reconectar: true`. They are the board's, not the program's: change only what the task needs,
+  and tell the user what there was (`antes`, in the result).
 - **The simulated micro keeps its state** between runs, like a board (its file system and its packs). If it carries
   things from before (old files in `/app`, a library that does not export what the program uses),
   `micro_simulado` with `de_cero: true` empties it (all its files and its packs zone; its configuration, the

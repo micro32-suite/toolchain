@@ -88,6 +88,9 @@ public final class Bp {
         out.println("        haga falta, como el IDE, y lo ejecuta; su salida y su código, como con las VMs del PC");
         out.println("  bp placa <COM22 | IP | sim> ls [ruta] | get <ruta> [fichero] | stop | info");
         out.println("        lista sus ficheros, baja uno (una captura: get /X.shot), para lo que corre, su INFO");
+        out.println("  bp placa <COM22 | IP | sim> packs | pack <fichero.pack | nombre>");
+        out.println("        los packs que tiene grabados, y grabar uno: un .pack, o uno de la instalación por su");
+        out.println("        nombre (Stdlib, Gui…); como el IDE, lo prepara para esa placa");
         out.println("  bp test [--guarda] [--tiempo=N] [<proyecto.bpbuild>] [<carpeta | prueba.bp …>]");
         out.println("        las pruebas: los programas de tests/ (o los que se le den), en las dos VMs del PC, sin");
         out.println("        pantalla; cada una está bien si acaba con 0, imprime lo mismo en las dos y, si tiene su");

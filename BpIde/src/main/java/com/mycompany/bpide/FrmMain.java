@@ -2796,8 +2796,9 @@ public class FrmMain extends javax.swing.JFrame
     private boolean autorizaLaPersona(Path carpeta) {
         boolean amplia = carpeta != null && demasiadoAmplia(carpeta);
         StringBuilder t = new StringBuilder("Una IA pide manejar el IDE: abrir, compilar y ejecutar programas, en el PC,"
-                + " en el micro\nsimulado y en las placas que se conecten; ver y cambiar las variables de entorno de esas"
-                + " placas;\ny abrir, guardar, subir y bajar ficheros ");
+                + " en el micro\nsimulado y en las placas que se conecten; ver y cambiar las variables de entorno y los"
+                + "\npacks de esas placas (formatear la zona de packs se te pregunta aparte); y abrir, guardar, subir y"
+                + " bajar ficheros ");
         if (carpeta != null) {
             t.append("dentro de\nesta carpeta y de sus subcarpetas:\n\n   ").append(carpeta).append('\n');
             if (amplia) {
@@ -4710,22 +4711,19 @@ public class FrmMain extends javax.swing.JFrame
             return;
         }
         FrmBoard fb = new FrmBoard(client, s -> appendConsola(s + "\n"));
-        fb.setEntorno(comandos, picoExplorer.entorno());   // V9 #876: su botón «Variables de entorno…»
-        /* V5/H8 — la familia de la placa, para grabar packs con motor nativo: hay
-         * que elegir qué motor va y relocalizarlo. Se pasa el PROVEEDOR y no el
-         * valor porque entre abrir esta ventana y darle a grabar puede haberse
-         * cambiado de placa, y grabar el motor de otra familia no da error: da un
-         * salto a un sitio que no es. */
-        fb.setArchPlaca(() -> picoExplorer != null ? picoExplorer.deviceArch() : 0);
+        // V9 #876 y #875: su botón «Variables de entorno…» y su panel de packs, sobre los comandos
+        fb.setComandos(comandos, picoExplorer.entorno(), picoExplorer.packs());
         /* V7/H10 (D7) — tras un PART_APPLY bueno, el explorador reinicia la placa y reconecta. */
         fb.setReiniciador((alVolver, alFallar) -> {
             if (picoExplorer == null) { alFallar.accept("sin explorador de dispositivo"); return; }
             picoExplorer.resetYReconectar(alVolver, alFallar);
         });
-        /* V7 #671 — y tras un PACK_* que reinicia la placa (motores ya cargados): reconectar, SIN mandar RESET. */
-        fb.setReconectador((alVolver, alFallar) -> {
-            if (picoExplorer == null) { alFallar.accept("sin explorador de dispositivo"); return; }
-            picoExplorer.reconectarTrasReinicio(alVolver, alFallar);
+        /* V9 #875 — y cuando la placa vuelva de un reinicio (unas particiones, o un pack con motores cargados, #671; lo
+         * pida esta ventana o la IA), el cliente nuevo, mientras la ventana esté abierta. */
+        final java.util.function.Consumer<BpvmClient> vuelve = fb::attach;
+        picoExplorer.alReconectar(vuelve);
+        fb.addWindowListener(new java.awt.event.WindowAdapter() {
+            @Override public void windowClosed(java.awt.event.WindowEvent e) { picoExplorer.olvidaAlReconectar(vuelve); }
         });
         fb.setSize(760, 520);
         fb.setLocationRelativeTo(this);

@@ -152,8 +152,8 @@ public final class EntornoPlaca {
                 .explica("Pone una variable de entorno en la placa conectada (o en el micro simulado): la crea, o le"
                         + " cambia el valor. Se escribe en su flash y sobrevive a regrabar la imagen; si ya valía eso, no"
                         + " se escribe. Devuelve lo que había («antes», si estaba: para poder dejarla como estaba) y todas"
-                        + " las que quedan («variables»). Casi todas se leen al arrancar: valen tras «placa_reiniciar» y"
-                        + " «placa_conectar». Pon sólo claves de la referencia, apéndice A, con un valor de los que dice"
+                        + " las que quedan («variables»). Casi todas se leen al arrancar: valen tras «placa_reiniciar»,"
+                        + " con «reconectar». Pon sólo claves de la referencia, apéndice A, con un valor de los que dice"
                         + " para esa placa: una que el firmware no conoce se guarda y nadie la lee, y lo que se da a"
                         + " packRam o a SQLite se le quita a la memoria de los programas.")
                 .parametro("clave", "la variable (packRam, display, sd, log…); no distingue mayúsculas")
