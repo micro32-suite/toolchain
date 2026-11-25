@@ -1126,6 +1126,20 @@ public final class Parser {
     private IStmt parseStmt() {
         panicMode = false;                      // §7a: cada sentencia parte "limpia"
         TokenType t = current().type;
+        if (esNombre("rem") && asignacionDe(mira(1).type) == null && (mira(1, TokenType.NEWLINE)
+                || mira(1).lexeme.matches("[\\p{L}\\d\"_].*"))) {   // V9 #904: con texto detrás; `rem := 3` es una variable
+            error("en BP un comentario va con //");
+            while (!isAtEnd() && !check(TokenType.NEWLINE)) advance();
+            skipNewlines();
+            return null;
+        }
+        if (esNombre("select") && mira(1, TokenType.CASE)) {   // V9 #904: el de los BASIC
+            error("en BP es 'switch': switch x … case 3 … default … endsw");
+            Token tok = current();
+            advance();
+            advance();
+            return restoDelSwitch(tok);
+        }
         if (empiezaPorOperador(current())) {   // V9 #860
             error("una sentencia no empieza por '" + current().lexeme + "'" + SIGUE_ARRIBA);
             synchronize();
@@ -1254,11 +1268,28 @@ public final class Parser {
                     : "en BP una variable se declara con 'var': var " + current().lexeme + ": integer");
         } else if (check(TokenType.PLUS) || check(TokenType.MINUS)) {
             error("en BP se suma y se resta con += y -=: x " + (check(TokenType.PLUS) ? "+" : "-") + "= 1");   // `x++` (#860)
+        } else if (check(TokenType.GT) && pegado(1, TokenType.GE) || check(TokenType.LT) && pegado(1, TokenType.LE)) {
+            error("en BP es '" + (check(TokenType.GT) ? "shr" : "shl") + "=': x " + (check(TokenType.GT) ? "shr" : "shl")
+                    + "= 2");   // `x >>= 2` (#904)
         } else {
             error("se esperaba una asignación o una llamada como sentencia");
         }
         synchronize();
         return null;
+    }
+
+    /** V9 #904 — el token de aquí, un nombre (no una palabra reservada) con ese texto. */
+    private boolean esNombre(String n) { return check(TokenType.IDENTIFIER) && n.equalsIgnoreCase(current().lexeme); }
+
+    /** V9 #904 — el token que está `k` más adelante. */
+    private Token mira(int k) { return tokens.get(Math.min(pos + k, tokens.size() - 1)); }
+
+    private boolean mira(int k, TokenType t) { return mira(k).type == t; }
+
+    /** V9 #904 — el token que está `k` más adelante es de ese tipo y va pegado al anterior, como los dos `>` de `>>`. */
+    private boolean pegado(int k, TokenType t) {
+        Token a = mira(k - 1), b = mira(k);
+        return b.type == t && b.line == a.line && b.column == a.column + a.lexeme.length();
     }
 
     // ---------- IF ----------
@@ -1294,8 +1325,12 @@ public final class Parser {
         IfClause thenC = new IfClause(cond, thenBody, tok.line, tok.column);
 
         List<IfClause> elseifs = new ArrayList<>();
-        while (check(TokenType.ELSEIF)) {
+        while (check(TokenType.ELSEIF) || check(TokenType.ELSE) && mira(1, TokenType.IF)) {
             Token elseifTok = current();
+            if (check(TokenType.ELSE)) {   // V9 #904: `else if`
+                error("en BP va junto: elseif, y un solo endif");
+                advance();
+            }
             advance();
             IExpr ec = parseExpr();
             consume(TokenType.THEN, "se esperaba 'then' tras la condición del 'elseif'");
@@ -1318,6 +1353,10 @@ public final class Parser {
     private SwitchStmt parseSwitchStmt() {
         Token tok = current();
         match(TokenType.SWITCH);
+        return restoDelSwitch(tok);
+    }
+
+    private SwitchStmt restoDelSwitch(Token tok) {
         IExpr subject = parseExpr();
         consumeStmtTerminator("se esperaba salto de línea tras la expresión del 'switch'");
         skipNewlines();
@@ -1460,14 +1499,31 @@ public final class Parser {
         return n;
     }
 
+    /** V9 #904 — `for (i := 0; i < n; i++)`, el de Java y de C: se dice, y se salta su cabecera. Su variable, si se ve. */
+    private String forDeC() {
+        error("el 'for' de BP cuenta o recorre: for i := 0 to n - 1 do … next i, for x in lista do … next x");
+        String iter = "?";
+        while (!isAtEnd() && !check(TokenType.NEWLINE)) {
+            if (check(TokenType.IDENTIFIER) && "?".equals(iter) && (mira(1, TokenType.ASSIGN) || mira(1, TokenType.EQUALS)
+                    || mira(1, TokenType.COLON)))
+                iter = current().lexeme;
+            advance();
+        }
+        return iter;
+    }
+
     // ---------- FOR ----------
     private ForStmt parseForStmt() {
         Token tok = current();
         match(TokenType.FOR);
-        String iter = consumeIdentifier("nombre del iterador del 'for'");
+        boolean deC = check(TokenType.LPAREN);
+        String iter = deC ? forDeC() : consumeIdentifier("nombre del iterador del 'for'");
 
         ForRange range;
-        if (asigna()) {
+        if (deC) {
+            range = new ForNumericRange(new IntLitExpr(0, tok.line, tok.column), new IntLitExpr(0, tok.line, tok.column), null,
+                    tok.line, tok.column);
+        } else if (asigna()) {
             IExpr from = parseExpr();
             consume(TokenType.TO, "se esperaba 'to' en el 'for' numérico");
             IExpr to = parseExpr();
@@ -1481,7 +1537,7 @@ public final class Parser {
             error("se esperaba ':=' (numérico) o 'in' (foreach) en el 'for'");
             range = new ForInRange(new NullLitExpr(tok.line, tok.column), tok.line, tok.column);
         }
-        consume(TokenType.DO, "se esperaba 'do' tras la cabecera del 'for'");
+        if (!deC) consume(TokenType.DO, "se esperaba 'do' tras la cabecera del 'for'");
         String nombre = nombreTrasDo();
 
         if (!check(TokenType.NEWLINE)) {
@@ -1729,10 +1785,19 @@ public final class Parser {
                 || check(TokenType.LT) || check(TokenType.GT)
                 || check(TokenType.LE) || check(TokenType.GE)) {
             Token op = current(); advance();
+            if ((op.type == TokenType.GT || op.type == TokenType.LT) && check(op.type) && pegado(0, op.type)) {   // V9 #904
+                String es = op.type == TokenType.GT ? "shr" : "shl";   // `a >> 2`, `a << 2`, `a >>> 2`
+                error("en BP el desplazamiento es '" + es + "': a " + es + " 2");
+                advance();
+                if (check(op.type)) advance();
+                return new BinaryExpr(es, left, parseAdd(), op.line, op.column);
+            }
             IExpr right = parseAdd();
             return new BinaryExpr(op.lexeme, left, right, op.line, op.column);
         }
-        if (check(TokenType.INSTANCEOF)) {
+        boolean conIs = esNombre("is") && mira(1, TokenType.IDENTIFIER);   // V9 #904: el de C#
+        if (conIs) error("en BP es 'instanceof'");
+        if (conIs || check(TokenType.INSTANCEOF)) {
             Token op = current(); advance();
             // Tras instanceof esperamos un identificador (nombre de clase).
             if (!check(TokenType.IDENTIFIER)) {
@@ -1895,6 +1960,15 @@ public final class Parser {
                 return new SuperExpr(tok.line, tok.column);
             }
             case LPAREN: {
+                if (esConversionDeJava()) {   // V9 #904: `(integer) a`, `(Perro) x`
+                    String t = mira(1).lexeme;
+                    error("en BP una conversión se escribe como una función: " + t + "(x)");
+                    Token del = mira(1);
+                    for (int k = 0; k < 3; k++) advance();
+                    List<IExpr> args = new ArrayList<>();
+                    args.add(parsePrimary());
+                    return new CallExpr(new IdentifierExpr(t, del.line, del.column), args, tok.line, tok.column);
+                }
                 advance();
                 IExpr inner = parseExpr();
                 consume(TokenType.RPAREN, "se esperaba ')'");
@@ -1902,6 +1976,11 @@ public final class Parser {
             }
             case LBRACKET: return parseArrayLiteral();
             case IDENTIFIER: {
+                if (esNombre("new") && (mira(1, TokenType.IDENTIFIER) || PRIMITIVOS.contains(mira(1).type))) {   // V9 #904
+                    error("en BP no hay 'new': se escribe " + mira(1).lexeme + (mira(2, TokenType.LBRACKET) ? "[n]" : "(…)"));
+                    advance();
+                    return parseAtom();
+                }
                 advance();
                 if (check(TokenType.LPAREN)) {
                     Token lp = current(); advance();
@@ -1912,6 +1991,10 @@ public final class Parser {
                 }
                 return new IdentifierExpr(tok.lexeme, tok.line, tok.column);
             }
+            case TILDE:   // V9 #904: el `~` de C (en BP, el del destructor)
+                error("BP no tiene el '~', el no de bits: x xor -1");
+                advance();
+                return parseAtom();
             // L10 — tipos estrechos como casts en posición de expresión:
             //   byte(x), int8(x), word(x), int16(x), short(x).
             // Se parsean como CallExpr con el nombre canónico del tipo;
@@ -1998,6 +2081,22 @@ public final class Parser {
                 error("se esperaba una expresión, encontrado '" + tok.lexeme + "'");
                 advance();
                 return new NullLitExpr(tok.line, tok.column);
+        }
+    }
+
+    /** V9 #904 — los tipos primitivos, como palabras. */
+    private static final java.util.Set<TokenType> PRIMITIVOS = java.util.EnumSet.of(TokenType.INTEGER, TokenType.LONG,
+            TokenType.FLOAT, TokenType.DOUBLE, TokenType.BYTE, TokenType.INT8, TokenType.WORD, TokenType.INT16,
+            TokenType.SHORT, TokenType.STRING, TokenType.BOOLEAN);
+
+    /** V9 #904 — una conversión de Java o de C: un tipo entre paréntesis y, pegado detrás, un valor. En BP, tras un `)`
+     *  no viene nunca un nombre ni un literal. */
+    private boolean esConversionDeJava() {
+        if (!mira(2, TokenType.RPAREN) || !(mira(1, TokenType.IDENTIFIER) || PRIMITIVOS.contains(mira(1).type))) return false;
+        switch (mira(3).type) {
+            case IDENTIFIER: return !"is".equalsIgnoreCase(mira(3).lexeme);
+            case INTEGER_LIT: case LONG_LIT: case FLOAT_LIT: case DOUBLE_LIT: case STRING_LIT: case THIS: return true;
+            default: return false;
         }
     }
 

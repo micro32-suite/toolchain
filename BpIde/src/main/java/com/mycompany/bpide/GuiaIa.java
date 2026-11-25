@@ -41,7 +41,7 @@ final class GuiaIa {
         Path guia = carpeta.resolve(GUIA);
         String texto = plantilla();
         if (texto == null) throw new IOException("el IDE no lleva la guía para IA (AGENTS.md)");
-        texto = conMarca(texto.replace("@INSTALACION@", raizDeLaInstalacion()));
+        texto = conMarca(conLaDeAhora(texto.replace("@INSTALACION@", raizDeLaInstalacion()), raizDeLaInstalacion()));
         if (!Files.exists(guia)) {
             Files.write(guia, texto.getBytes(StandardCharsets.UTF_8));
             escritos.add(guia);
@@ -64,6 +64,16 @@ final class GuiaIa {
             escritos.add(claude);
         }
         return escritos;
+    }
+
+    /** V9 #908 — bajo el título, cuál es la de ahora: la copia es la del IDE que la dejó, y si se pone al día BasicPlus y
+     *  la IA empieza antes de abrir el IDE, lee la de antes (en la prueba final, media prueba con la vieja). */
+    static String conLaDeAhora(String texto, String raiz) {
+        int i = texto.indexOf('\n');
+        if (i < 0 || raiz.isEmpty() || !Files.isRegularFile(java.nio.file.Paths.get(raiz, GUIA))) return texto;
+        return texto.substring(0, i + 1) + "\n> The current guide is `" + raiz + GUIA + "`. This is the copy the IDE left here: if"
+                + " they differ (BasicPlus was\n> updated, and the IDE has not been opened on this folder since), read that one.\n"
+                + texto.substring(i + 1);
     }
 
     /** El texto, con su marca detrás. */

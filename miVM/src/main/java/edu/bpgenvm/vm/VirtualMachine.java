@@ -6130,7 +6130,7 @@ public class VirtualMachine {
                 String path = readVmString(popTcRef(tc));
                 // Espejo de la VM-C, donde el display existe desde Gui.Screen(): si la
                 // ventana aun no ha nacido (el hilo del GUI no ha dado su primera vuelta)
-                // se crea aqui; sin ventana posible (headless), shot() dira -1.
+                // se crea aqui; sin ventana posible (headless), la pinta fuera (--no-screen, #906) o dice -1.
                 if (!guiStarted && !java.awt.GraphicsEnvironment.isHeadless()) { gui.start(); guiStarted = true; }
                 java.nio.file.Path enPc = sandboxPath(tc, path);   // #810: fuera de la flash, null: -2 al escribir
                 pushTc(tc, gui.shot(enPc != null ? enPc.toString() : null));

@@ -1143,6 +1143,20 @@ final class JcParser {
             espera(";");
             return;
         }
+        if ((esNombre("synchronized") || esNombre("lock")) && mira(1).es("(") && trasElCierre().es("{")) {   // V9 #904
+            apunta(error("JC no tiene '" + actual().texto + "': un Mutex, con lock() y unlock(), o una propiedad sync"));
+            avanza();
+            espera("(");
+            expresion();
+            espera(")");
+            out.addAll(bloque());
+            return;
+        }
+        if (esNombre() && mira(1).es(":") && (mira(2).es("for") || mira(2).es("foreach") || mira(2).es("while") || mira(2).es("do"))) {
+            apunta(error("en JC el nombre de un bucle va detrás de su palabra: " + mira(2).texto + " " + actual().texto + " …"));   // V9 #904
+            avanza();
+            avanza();
+        }
         if (esNombre("System") && mira(1).es(".") && mira(3).es(".") && (mira(4).es("print") || mira(4).es("println")))
             throw error("en JC es println(x), con el salto de línea, o print(x), sin él");
         if (es("if"))       { out.add(si()); return; }
@@ -1204,6 +1218,14 @@ final class JcParser {
             else if (t.tipo == Tipo.FIN) return -1;
         }
         return -1;
+    }
+
+    /** V9 #904 — desde el nombre que va delante de una `(`: lo que viene tras la `)` que la cierra. */
+    private Tok trasElCierre() {
+        pos++;
+        int c = cierre();
+        pos--;
+        return c >= 0 && c + 1 < toks.size() ? toks.get(c + 1) : toks.get(toks.size() - 1);
     }
 
     /** El `if` de C (punto 8). Sin `else` y sin llaves, el de una línea de BP; `else if` es su `elseif`. */
@@ -1371,6 +1393,11 @@ final class JcParser {
             String var = null, tipoExc = null;
             if (acepta("(")) {
                 tipoExc = nombrePunteado("el tipo de la excepción");
+                if (es("|")) {   // V9 #904: el de Java
+                    apunta(error("un catch por cada excepción: catch (" + tipoExc + " e) { … } catch (" + mira(1).texto
+                            + " e) { … }"));
+                    while (acepta("|")) nombrePunteado("el tipo de la excepción");
+                }
                 var = nombre("el nombre de la excepción");
                 espera(")");
             }
@@ -1670,6 +1697,10 @@ final class JcParser {
                 if (!es("is")) apunta(error("en JC es 'is', como en C#"));
                 Tok op = avanza();
                 l = new InstanceOfExpr(l, nombrePunteado("el nombre de una clase tras 'is'"), op.linea, op.columna);
+            } else if (esNombre("as") && mira(1).tipo == Tipo.NOMBRE) {   // V9 #904: el de C#
+                apunta(error("JC no tiene 'as': una conversión se escribe (" + mira(1).texto + ") x"));
+                avanza();
+                nombrePunteado("el nombre de una clase tras 'as'");
             } else {
                 return l;
             }
@@ -1680,6 +1711,10 @@ final class JcParser {
         IExpr l = suma();
         while (es("<<") || es(">>")) {
             Tok op = avanza();
+            if (op.es(">>") && es(">") && actual().linea == op.linea && actual().columna == op.columna + 2) {   // V9 #904
+                apunta(error("JC no tiene el '>>>', el desplazamiento sin signo: >>, que arrastra el signo"));
+                avanza();
+            }
             l = new BinaryExpr(op.texto.equals("<<") ? "shl" : "shr", l, suma(), op.linea, op.columna);
         }
         return l;

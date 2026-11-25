@@ -284,6 +284,9 @@ public final class Lexer {
                 continue;
             }
 
+            // V9 #904 — lo de otro lenguaje que en BP no es nada: se dice cómo se escribe, y se sigue
+            if (deOtroLenguaje(c, startLine, startColumn, tokens)) continue;
+
             // Carácter desconocido
             errors.add(new LexerError(
                     String.format("carácter inesperado: '%s' (U+%04X)", c, (int) c),
@@ -653,6 +656,13 @@ public final class Lexer {
             advance(); advance();
             return new Token(TokenType.NEQ, "!=", null, startLine, startColumn);
         }
+        // V9 #904 — los de Java, C y C#: como el '<>'.
+        if (c == '&' && n == '&') return otroOperador(2, TokenType.AND, "and", "en BP '&&' es 'and'", startLine, startColumn);
+        if (c == '|' && n == '|') return otroOperador(2, TokenType.OR, "or", "en BP '||' es 'or'", startLine, startColumn);
+        if (c == '!') return otroOperador(1, TokenType.NOT, "not", "en BP '!' es 'not'", startLine, startColumn);
+        if (c == '%' && n == '=')
+            return otroOperador(2, TokenType.MOD_ASSIGN, "mod=", "en BP '%=' es 'mod='", startLine, startColumn);
+        if (c == '%') return otroOperador(1, TokenType.MOD, "mod", "en BP '%' es 'mod': a mod b", startLine, startColumn);
 
         // Operadores de un carácter.
         switch (c) {
@@ -685,6 +695,48 @@ public final class Lexer {
             case '.': return make1(TokenType.DOT,       ".", startLine, startColumn);
         }
         return null;
+    }
+
+    /** V9 #904 — un operador de otro lenguaje: el error que dice cómo se escribe, y el de BP en su sitio, para que no
+     *  vengan detrás los de un operador que el parser no entiende. */
+    private Token otroOperador(int largo, TokenType t, String lexema, String como, int startLine, int startColumn) {
+        errors.add(new LexerError(como, startLine, startColumn));
+        for (int i = 0; i < largo; i++) advance();
+        return new Token(t, lexema, null, startLine, startColumn);
+    }
+
+    /** V9 #904 — el comentario de otro lenguaje (`# …`, y la comilla de los BASIC, `' …`), la cadena entre comillas
+     *  simples o con un `$` delante, y el `? :`. */
+    private boolean deOtroLenguaje(char c, int startLine, int startColumn, List<Token> tokens) {
+        if (c == '$' && peek(1) == '"') {
+            errors.add(new LexerError("BP no tiene las cadenas $\"…\" (la interpolación): se unen con +, \"a = \" + a",
+                    startLine, startColumn));
+            advance();
+            tokens.add(scanString(line, column));
+            return true;
+        }
+        if (c == '?') {
+            errors.add(new LexerError("BP no tiene el '? :' (JC, sí): if … then … else … endif", startLine, startColumn));
+            while (!isAtEnd() && peek() != '\n' && peek() != '\r') advance();
+            return true;
+        }
+        boolean empiezaLaLinea = tokens.isEmpty() || tokens.get(tokens.size() - 1).line < startLine
+                || tokens.get(tokens.size() - 1).type == TokenType.NEWLINE;
+        int fin = 1;
+        while (peek(fin) != '\'' && peek(fin) != '\n' && peek(fin) != '\r' && peek(fin) != '\0') fin++;
+        if (c == '\'' && !empiezaLaLinea && peek(fin) == '\'') {
+            errors.add(new LexerError("en BP las cadenas van entre comillas dobles", startLine, startColumn));
+            String texto = source.substring(pos + 1, pos + fin);
+            for (int i = 0; i <= fin; i++) advance();
+            tokens.add(new Token(TokenType.STRING_LIT, '"' + texto + '"', texto, startLine, startColumn));
+            return true;
+        }
+        if (c == '\'' || c == '#') {
+            errors.add(new LexerError("en BP un comentario va con //", startLine, startColumn));
+            while (!isAtEnd() && peek() != '\n' && peek() != '\r') advance();
+            return true;
+        }
+        return false;
     }
 
     private Token make1(TokenType t, String lex, int startLine, int startColumn) {

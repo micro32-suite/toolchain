@@ -74,6 +74,10 @@ public final class GuiBackend {
 
     private JFrame frame;
 
+    /** V9 #906 — `--no-screen`: sin ventana, pero la pantalla se pinta fuera para quien la capture (Gui.shot), como en la
+     *  VM-C. Un headless a secas (el del arnés de paridad, frente a una VM-C sin LVGL) sigue sin pantalla. */
+    public static volatile boolean fueraDePantalla = false;
+
     /** V8/H2, paso 2 (9-nov) — las teclas de la ventana, al teclado del SO de la VM (Teclado.java). La VM pone a quien
      *  se las da, y ese mira si hay un teclado conectado (en el PC, el simulado del Bluetooth): sin él, no teclea. El
      *  código es el del estándar HID y el estado, los bits del teclado del SO (TeclasSwing). */
@@ -935,7 +939,7 @@ public final class GuiBackend {
      *  imagen es la LOGICA (antes de girar nada) y la cabecera lleva `rot`.
      *
      *  Devuelve los bytes escritos (> 0) o un codigo negativo, EL MISMO que la
-     *  VM-C: -1 sin pantalla (headless, o aun no hay ventana), -2 error de
+     *  VM-C: -1 sin pantalla (headless sin --no-screen, o aun no hay ventana), -2 error de
      *  escritura, -3 no cabe (aqui no aplica: no hay tope de RAM), -4 sin
      *  memoria. NO imprime nada: el RuntimeError con el mensaje fijo lo lanza
      *  Gui.bp, y asi la paridad de stdout no depende de los pixeles.
@@ -944,8 +948,10 @@ public final class GuiBackend {
      *  directo; si no, invokeAndWait — llamarlo desde el EDT con invokeAndWait
      *  seria un deadlock, de ahi la comprobacion. */
     public int shot(String rutaResuelta) {
-        final JFrame f = frame;
-        if (f == null || screenHandle == 0) return -1;         // headless o sin ventana: sin pantalla
+        /* V9 #906 — con --no-screen se pinta igual, fuera de pantalla, como la VM-C: el mismo programa capturaba en una y
+         * en la otra lanzaba «sin pantalla». */
+        final boolean sinVentana = frame == null && fueraDePantalla;
+        if (frame == null && !sinVentana || screenHandle == 0) return -1;   // headless o sin ventana: sin pantalla
         final Node root = nodes.get(screenHandle);
         if (root == null) return -1;
         final int w = screenW, h = screenH;
@@ -959,6 +965,12 @@ public final class GuiBackend {
             return -4;
         }
         Runnable paint = () -> {
+            if (sinVentana) {                                  // lo que hace start() al meterla en la ventana
+                root.comp.setBounds(0, 0, w, h);
+                if (!root.comp.isDisplayable()) root.comp.addNotify();   // sin él, Swing no coloca lo de dentro de un botón
+                for (Node n : nodes.values()) relayout(n);
+                root.comp.validate();
+            }
             Graphics2D g = img.createGraphics();
             try {
                 g.setColor(Color.BLACK);

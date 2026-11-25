@@ -83,6 +83,29 @@ public final class Despliegue {
      *  coincide con el local, sin depender de la memoria de sesión. */
     private volatile Map<String, Long> deviceCrcByPath = Collections.emptyMap();
 
+    /** V9 #907 — las librerías que la placa tiene en otra compilación y la regla de subida dio por buenas (#624): de dónde
+     *  las carga, en el último {@link #sube}. */
+    private final Map<String, String> otraCompilacion = new ConcurrentHashMap<>();
+
+    private static final java.util.regex.Pattern NO_EXPORTA =
+            java.util.regex.Pattern.compile("lib '([^']+)' presente pero no exporta");
+
+    /** V9 #907 — qué hacer si el programa no enlazó con una librería de la placa («lib 'X' presente pero no exporta…»), con
+     *  de dónde la carga; "" si no es eso. El remedio depende del sitio: la de un pack se regraba; la de {@code /lib}, si
+     *  es de su imagen, vuelve en cada arranque aunque se borre (la IA de la prueba final la borró y volvió). */
+    public String pista(String estado) {
+        java.util.regex.Matcher m = NO_EXPORTA.matcher(estado == null ? "" : estado);
+        String x = m.find() ? m.group(1) : null, donde = x == null ? null : otraCompilacion.get(x);
+        if (donde == null) return "";
+        String que = "la placa carga '" + x + "' de " + donde + ", y no es la de esta instalación: ";
+        if (donde.startsWith("pack:")) {
+            String pack = donde.substring(5, donde.indexOf('/') > 5 ? donde.indexOf('/') : donde.length());
+            return que + "graba en ella el pack " + pack + " de esta instalación (y retira el suyo)";
+        }
+        return que + "bórralo y reinicia la placa. Si vuelve, lo repone su imagen, que es de otra versión: graba en ella la de"
+                + " esta instalación (docs/INSTALAR_FIRMWARE.md)";
+    }
+
     /** Una conexión nueva: lo que se subió en la anterior ya no cuenta. */
     public void olvida() {
         sentCrc.clear();
@@ -105,6 +128,7 @@ public final class Despliegue {
         final List<File> deps = (depMods != null) ? depMods : Collections.emptyList();
         final Set<String> libNames = (libDepNames != null) ? libDepNames : Collections.emptySet();
         final Map<String, File> resources = (resourceFiles != null) ? resourceFiles : Collections.emptyMap();
+        otraCompilacion.clear();   // V9 #907
 
         // 0) Sondea LS para saber qué hay ya en el FS remoto (tamaño + CRC real).
         Map<String, Long> remote = new HashMap<>();
@@ -170,6 +194,8 @@ public final class Despliegue {
                         basicplus.frontend.ReglaDeSubida.formatoDe(depBytes),
                         basicplus.frontend.ReglaDeSubida.versionDe(depBytes), crc32(depBytes));
                 subir = dd.subir;
+                if (!subir && st.crc != crc32(depBytes))   // V9 #907: se da por buena, y quizá no tenga lo que se pide
+                    otraCompilacion.put(dep.getName().replaceFirst("[.]mod$", ""), st.path);
                 final boolean enPack = st.path.startsWith("pack:");
                 depRemote = (subir && enPack) ? donde_le_tocaria : st.path;
                 motivo = (subir && enPack) ? dd.motivo + ": se sube delante del pack" : dd.motivo;

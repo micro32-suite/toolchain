@@ -1408,6 +1408,8 @@ public final class PicoExplorer extends JPanel {
             }
             if (outputSink != null) {
                 outputSink.accept("[Explorer] VM finished: " + statusStr);
+                String pista = despliegue.pista(statusStr);   // V9 #907
+                if (!pista.isEmpty()) outputSink.accept("[Explorer] " + pista);
             }
             status.setText("Done: " + statusStr);
             /* V9 #868 — el fin, DESPUÉS del refresco del árbol (como subir y borrar, IDE-7). Avisando antes, quien

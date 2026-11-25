@@ -48,6 +48,7 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
 - A project's `resources/` (a `.win` form, images, fonts, data) travel to a board with the program. On the PC the program
   finds them only in its pack: with `"out": "pack"` in the `.bpbuild`, `bp run App.bpbuild` runs the pack. A test in
   `tests/`, run from the project's folder, reads them there: `w.load("resources/main.win")`.
+- A program with a database does not run on the PC's two VMs (`falta el modulo 'SQLite'`): `bp run --sim`.
 
 ## Tests
 
@@ -102,9 +103,11 @@ code. Files on the PC: only inside the folder the user allowed.
   cannot start it: use PowerShell). The IDE first asks the user, and writes how it went in one line of its output:
   `[ia] servidor para la IA en …` if allowed, another `[ia] …` line if not. Then connect (or reconnect).
 - **A board keeps its standard library** (its `Stdlib.pack`), and the IDE does not upload a library the board already
-  has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's library is
-  older than this installation's: ask the user to let you burn this installation's `Stdlib` on it (`pack_grabar`), and
-  then retire the old one (`pack_borrar`, with its `offset`, from `habia`).
+  has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's X is older
+  than this installation's, and the line after it says where the board loads it from. From a pack: ask the user to let you
+  burn this installation's `Stdlib` (`pack_grabar`), and then retire the old one (`pack_borrar`, with its `offset`, from
+  `habia`). From `/lib`: delete it and reboot; if it comes back, the board's firmware puts it there at every start, and is
+  of another version: the user has to flash this installation's (`@INSTALACION@docs/en/INSTALAR_FIRMWARE.md`).
 - **The board's packs** (a zone of its flash with its libraries and engines: `Stdlib`, `Gui`, `SQLite`…): `packs_listar`,
   `pack_ficheros`, `pack_grabar` (one of this installation's, by its name, or a `.pack`), `pack_borrar` (retires it: its
   room comes back only by formatting) and `packs_formatear` (empties the zone; the IDE asks the user first, every time).
@@ -135,8 +138,8 @@ code. Files on the PC: only inside the folder the user allowed.
 | You would write | In BasicPlus |
 |---|---|
 | `list.size()` | `list.length()` |
-| `Map<String, Integer>` | No generic map: `import Collections`, then `var m: Collections.Map := Collections.stringMap()` |
-| `m.put("a", 5)` | A number in an `Object` goes in its box: `m.put("a", Integer(5))`; read it with `m.getInteger("a")`. (`List.add(5)` boxes it for you.) |
+| `Map<String, Item>` | `import Collections`, then `var m: Collections.Map<string, Item> := Collections.Map()`; with `integer` keys, `Collections.Map<integer, Item> := Collections.numericMap()`. What you get is an `Item`, no cast |
+| `Map<String, Integer>`, `m.put("a", 5)` | A number goes in its box: `Collections.Map<string, Integer>`, `m.put("a", Integer(5))`; read it with `m.getInteger("a")`. (`List.add(5)` boxes it for you.) |
 | `s.toUpperCase()`, `s.length()` | Strings have no methods: `upper(s)`, `strlen(s)`, `substring(s, from, to)` (`to` not included)… In `Core`; more in `Str`. |
 | `static` | Qualify with the class: `public property Counter.total: integer`, `public function Counter.reset()` … `end Counter.reset`, called as `Counter.reset()` |
 | public fields | `public property x: integer` |
@@ -144,6 +147,9 @@ code. Files on the PC: only inside the folder the user allowed.
 | `=` to assign | `:=` assigns; `==` compares |
 | `package com.example;` | `library "com.example"`, before `module` (in JC, with `;`). The module is then `com.example.Util`, and is imported by that full name, always (`import com.example.Util`, used as `Util.f()`). A module of yours called like one of the standard library (`Log`, `App`, `Json`…: `bp api` lists them) needs one |
 | a long line | It goes on if it ends in an operator or a comma: `"a" +` at the end of the line, not at the start of the next |
+| a helper of the module, called from a class | It has to be `public`: a class, even one of the same module, uses only the module's `public` functions, variables and constants |
+| `a ^ b` | `a xor b`: in BasicPlus `^` is the power, and it compiles. `&&`, `\|\|`, `!`, `%`, `>>`, `<<` are `and`, `or`, `not`, `mod`, `shr`, `shl` |
+| `t.isAlive()` | A `Thread` has `start()` and `join()`, no more: if you need to know, a flag of yours, under a `Mutex` |
 
 What does work as you would expect: `class B extends A`, `super(x)` in the constructor and `super.method()`;
 `for i := 0 to n do … next i` (`n` included); `for x in list do … next x`; `"text " + number`; `+=`;
@@ -194,7 +200,7 @@ the same, with the same names and the same traps as above.
     returns when someone calls `Gui.stop()` or closes it.
   - `Gui.shot("X.shot")` writes a capture (call `sleep(300)` before, so the screen gets painted), and
     `bp png X.shot` turns it into `X.png`. The capture that counts is LVGL's: `bp run --c --no-screen X.bp`. The
-    Java VM paints with Swing, an approximation. On a board, the capture stays in its file system (a relative path,
+    Java VM paints with Swing, an approximation (no `Chart`, no `Led`). On a board, the capture stays in its file system (a relative path,
     at its root): download it (`bp placa COM22 get X.shot`; with the IDE, `placa_bajar`) and turn it into a PNG the
     same way.
 - Models to copy: `samples/GuiShot.bp`, `samples/GuiClickDemo.bp`, `samples/ChartDemo.bp`, and a GUI that tests
@@ -208,7 +214,9 @@ one on any two pins (`modSoftI2C.SoftI2C(sda, scl)`); only the constructor chang
 to the console. **Do not invent pin numbers**: ask which board it is and look at `@INSTALACION@docs/en/PLACAS.md` —each
 board's pins (the program's, each bus's and the system's) and the links to its manufacturer's documentation, which has what
 is soldered on it (LED, button, display, connectors)—; or ask the board itself, running
-`@INSTALACION@samples/PinesPlaca.bp` on it, which prints those pins. The device libraries, in the reference §14.
+`@INSTALACION@samples/PinesPlaca.bp` on it, which prints those pins. The libraries of some devices (`Bmp280`,
+`Mcp9804`…), in the reference §14.22; those of the micro's peripherals, in its §14. To test without the sensor, a class of
+yours that `extends I2c.I2C` and answers as the sensor would.
 
 ## How to work
 

@@ -49,6 +49,22 @@ public final class DependenciasDelMod {
         return resultado;
     }
 
+    /** V9 #904 — los que importa {@code principal}, o uno de los suyos, y no están en ninguna de esas carpetas: los que la
+     *  VM del PC no va a encontrar (los de un pack, o uno que se ha perdido). */
+    public static List<String> faltan(Path principal, List<Path> dondeBuscar, Path stdlibDir) throws IOException {
+        List<String> resultado = new ArrayList<>();
+        Set<String> vistos = new LinkedHashSet<>();
+        ArrayDeque<String> cola = new ArrayDeque<>(PackStep.duenosDeImports(Files.readAllBytes(principal)));
+        while (!cola.isEmpty()) {
+            String nombre = cola.poll();
+            if (!vistos.add(nombre)) continue;
+            Path mod = localizar(nombre, dondeBuscar, stdlibDir);
+            if (mod == null) resultado.add(nombre);
+            else cola.addAll(PackStep.duenosDeImports(Files.readAllBytes(mod)));
+        }
+        return resultado;
+    }
+
     private static Path localizar(String nombre, List<Path> dondeBuscar, Path stdlibDir) {
         List<Path> orden = new ArrayList<>();
         if (stdlibDir != null && (Files.isRegularFile(stdlibDir.resolve(nombre + ".bp"))

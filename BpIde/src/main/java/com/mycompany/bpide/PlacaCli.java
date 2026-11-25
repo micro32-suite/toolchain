@@ -140,8 +140,8 @@ public final class PlacaCli {
             if (dc != null) {
                 try { perfil = Despliegue.Perfil.delInfo(dc.getInfo(4000)); } catch (IOException sinInfo) { /* sin él */ }
             }
-            String remoto = new Despliegue().sube(c.b, dc, perfil, modPath.toFile(), deps, libs, recursos, prefijo,
-                    PlacaCli::err);
+            Despliegue despliegue = new Despliegue();
+            String remoto = despliegue.sube(c.b, dc, perfil, modPath.toFile(), deps, libs, recursos, prefijo, PlacaCli::err);
             if (c.b instanceof AbstractBpvmBackend) ((AbstractBpvmBackend) c.b).sinTrazaEnLaSalida();
             String fin = c.b.run(remoto, argumento, System.out::println);   // la salida del programa, tal cual
             System.out.flush();
@@ -159,6 +159,8 @@ public final class PlacaCli {
                 for (String l : Traza.lineas(e.stackTrace, donde)) err(l);
             }
             if (e.exitCode != 0) err("bp: " + fin);
+            String pista = despliegue.pista(fin);   // V9 #907
+            if (!pista.isEmpty()) err("bp: " + pista);
             return e.exitCode;
         } catch (IOException ex) {
             err("bp: " + destino + ": " + ex.getMessage());

@@ -116,6 +116,23 @@ public final class SemanticAnalyzer {
                 return enEsteLenguajeEs("List");
             case "Map": case "HashMap": case "TreeMap": case "Hashtable": case "Dictionary":
                 return (enEsteLenguajeEs("Collections.Map")) + (importa("Collections") ? "" : ", con import Collections");
+            // V9 #904 — las excepciones de Java y de C#: las que lanza la VM tienen la suya en Core
+            case "Throwable": case "Error":               return enEsteLenguajeEs("Exception");
+            case "NullPointerException": case "NullReferenceException":
+                return enEsteLenguajeEs("NullReferenceError");
+            case "IndexOutOfBoundsException": case "ArrayIndexOutOfBoundsException":
+            case "StringIndexOutOfBoundsException": case "IndexOutOfRangeException":
+                return enEsteLenguajeEs("IndexError");
+            case "ArithmeticException": case "DivideByZeroException": case "OverflowException":
+                return enEsteLenguajeEs("ArithmeticError");
+            case "ClassCastException": case "InvalidCastException":
+                return enEsteLenguajeEs("CastError");
+            case "IOException": case "FileNotFoundException": case "UncheckedIOException":
+                return enEsteLenguajeEs("IOError");
+            case "RuntimeException": case "IllegalArgumentException": case "IllegalStateException": case "ArgumentException":
+            case "ArgumentNullException": case "InvalidOperationException": case "UnsupportedOperationException":
+            case "NotImplementedException": case "NumberFormatException": case "FormatException":
+                return enEsteLenguajeEs("RuntimeError");
             default:                                      return "";
         }
     }
@@ -132,12 +149,40 @@ public final class SemanticAnalyzer {
                     || ns.consts.containsKey(n) || ns.properties.containsKey(n))
                 return ": está en '" + ns.name + "', y se escribe " + ns.name + "." + n;
         }
+        if ("System".equals(n) || "Environment".equals(n) || "DateTime".equals(n)) {   // V9 #904: según lo que se le pide
+            if ("currentTimeMillis".equals(miembroPedido) || "nanoTime".equals(miembroPedido) || "TickCount".equals(miembroPedido))
+                return ": los milisegundos, now()";
+            if ("DateTime".equals(n)) return ": la fecha y la hora, Time.now(), con import Time";
+        }
         if ("System".equals(n) || "Console".equals(n))
             return ": para escribir en la consola, " + (enJc ? "println(x)" : "print x");
+        if ("nil".equals(n) || "None".equals(n) || "Nothing".equals(n) || "undefined".equals(n))   // V9 #904
+            return enEsteLenguajeEs("null");
         if ("String".equals(n)) return ": las cadenas se tratan con funciones; de un número, intToString(n)";
         for (java.nio.file.Path d : carpetasDeModulos)
             if (!importa(n) && java.nio.file.Files.isRegularFile(d.resolve(n + ".mod")))
                 return ": hay un módulo '" + n + "'; falta import " + n;
+        return "";
+    }
+
+    /** V9 #904 — lo que se le pide al nombre que se está resolviendo (el `currentTimeMillis` de `System.…`); null, nada. */
+    private String miembroPedido;
+
+    /** V9 #904 — una función que no hay, llamada con el nombre que tiene en otro sitio: la consola, el cerrojo, y una
+     *  estática llamada sin su clase. */
+    private String pistaLlamada(String n) {
+        switch (n) {
+            case "println": case "printf": case "echo": case "puts": case "writeln": case "WriteLine":
+                return ": para escribir en la consola, " + (enJc ? "println(x)" : "print x");
+            case "synchronized": case "lock":
+                return ": un Mutex, con lock() y unlock()";
+            default:
+        }
+        if (currentClass != null && currentClass.lookupStatic(n) instanceof FunctionSymbol)
+            return ": es de la clase, y se llama con su nombre, " + currentClass.name + "." + n + "(…)";
+        for (Symbol s : module.members.getSymbols())
+            if (s instanceof ClassSymbol && ((ClassSymbol) s).staticMembers.tryLookup(n) instanceof FunctionSymbol)
+                return ": está en la clase '" + s.name + "', y se llama " + s.name + "." + n + "(…)";
         return "";
     }
 
@@ -3446,7 +3491,8 @@ public final class SemanticAnalyzer {
                         excT = new ClassType(csym);
                         info.catchClassSymbols.put(cl, csym);   // BUG-2: el emisor decide local vs ext
                     } else {
-                        err(cl.line, cl.column, "tipo de excepción '" + cl.exceptionType + "' no es una clase");
+                        err(cl.line, cl.column, "tipo de excepción '" + cl.exceptionType + "' no es una clase"
+                                + pistaTipo(cl.exceptionType));   // V9 #904
                         excT = ErrorType.INSTANCE;
                     }
                 }
@@ -3884,7 +3930,9 @@ public final class SemanticAnalyzer {
     }
 
     private BpType analyzeMemberAccess(MemberAccessExpr ma, Scope scope) {
+        miembroPedido = ma.member;   // V9 #904: si el nombre no se resuelve, qué se le pedía
         BpType tgtT = analyzeExpr(ma.target, scope, null);
+        miembroPedido = null;
 
         // Acceso estático: ClassName.member o EnumName.MEMBER o ImportedModule.func
         if (ma.target instanceof IdentifierExpr) {
@@ -4047,7 +4095,8 @@ public final class SemanticAnalyzer {
             err(ix.line, ix.column, "índice debe ser integer, no '" + idxT.display() + "'");
         if (t instanceof ArrayType) return ((ArrayType) t).element;
         if (t instanceof ErrorType) return ErrorType.INSTANCE;
-        err(ix.line, ix.column, "el tipo '" + t.display() + "' no es indexable");
+        err(ix.line, ix.column, "el tipo '" + t.display() + "' no es indexable"
+                + (t == PrimitiveType.STRING ? ": un carácter es charAt(s, i), y su código, charCodeAt(s, i)" : ""));   // V9 #904
         return ErrorType.INSTANCE;
     }
 
@@ -4598,6 +4647,8 @@ public final class SemanticAnalyzer {
         for (IExpr a : ce.args) analyzeExpr(a, scope, null);
         if (target == null && ce.callee instanceof IdentifierExpr) {
             String n = ((IdentifierExpr) ce.callee).name, pista = pistaNombre(n);
+            if (pista.isEmpty()) pista = pistaTipo(n);       // V9 #904: `RuntimeException("…")`
+            if (pista.isEmpty()) pista = pistaLlamada(n);
             if (pista.isEmpty() && (currentClass == null || currentClass.lookupInstance(n) == null))   // V9 #860
                 pista = ": no hay ninguna función con ese nombre";
             err(ce.line, ce.column, "no se puede llamar a '" + n + "'" + pista);
@@ -5758,6 +5809,19 @@ public final class SemanticAnalyzer {
     /** V9 #897 — false: es un módulo de un proyecto que no es su main. */
     boolean esperaMain = true;
 
+    /** V9 #904 — el `main` de una clase, como en Java y en C#: aquí no es el programa. */
+    private String mainDeUnaClase() {
+        for (Symbol s : module.members.getSymbols()) {
+            if (!(s instanceof ClassSymbol)) continue;
+            ClassSymbol c = (ClassSymbol) s;
+            for (String n : new String[] { "main", "Main" })
+                if (c.staticMembers.tryLookup(n) instanceof FunctionSymbol || c.instanceMembers.tryLookup(n) instanceof FunctionSymbol)
+                    return ": el de la clase '" + c.name + "' no vale; va en el módulo, fuera de las clases, "
+                            + (enJc ? "function void main() { … }" : "function main() … end main");
+        }
+        return "";
+    }
+
     private void validateModuleEntryPoints(ModuleNode mod) {
         // Las interfaces son contratos puros: sin main, sin entry-point. No
         // tiene sentido avisar de su ausencia.
@@ -5765,7 +5829,7 @@ public final class SemanticAnalyzer {
         if (module.mainFunction == null) {
             if (esperaMain)
                 warn(mod.line, mod.column,
-                    "el módulo '" + mod.name + "' no define 'main' ni 'Main' (no podrá ser módulo principal)");
+                    "el módulo '" + mod.name + "' no define 'main' ni 'Main' (no podrá ser módulo principal)" + mainDeUnaClase());
             return;
         }
         FunctionSymbol m = module.mainFunction;

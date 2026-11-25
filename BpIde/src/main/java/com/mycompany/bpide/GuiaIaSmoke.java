@@ -57,6 +57,15 @@ public final class GuiaIaSmoke {
             mira(e.isEmpty() && lee(g).equals(x[1]) && dicho.size() == 1 && dicho.get(0).contains("no se toca"),
                     x[0] + ", no se toca, y se dice: " + dicho);
         }
+        // V9 #908 — la copia dice cuál es la de ahora, si la instalación la trae
+        Path inst = Files.createTempDirectory("inst");
+        pon(inst.resolve(GuiaIa.GUIA), "# la de la instalación\n");
+        String raiz = inst.toString().replace('\\', '/') + "/";
+        String con = GuiaIa.conLaDeAhora("# T\n\nlo de siempre\n", raiz);
+        mira(con.startsWith("# T\n\n> The current guide is `" + raiz + "AGENTS.md`") && con.endsWith("\n\nlo de siempre\n"),
+                "bajo el título, la de ahora: " + con.replace('\n', '|'));
+        mira(GuiaIa.conLaDeAhora("# T\n", "").equals("# T\n") && GuiaIa.conLaDeAhora("# T\n", d.toString() + "/nada/").equals("# T\n"),
+                "... y sin ella, el texto tal cual");
         System.out.println(fallos == 0 ? "GuiaIaSmoke: TODO BIEN" : "GuiaIaSmoke: " + fallos + " FALLO(S)");
         System.exit(fallos == 0 ? 0 : 1);
     }

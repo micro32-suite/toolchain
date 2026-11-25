@@ -327,6 +327,7 @@ public final class Main {
             boolean ok = compileFull(source, ctx, 0);
             boolean success = ok && ctx.totalErrors == 0;
             if (success && ctx.pruneBpi) pruneWrittenBpi(ctx);
+            if (success) traeLosDeFuera(ctx);   // V9 #903
             return success;
         } catch (IOException ex) {
             System.err.println("compileFile: " + ex.getClass().getSimpleName() + ": " + ex.getMessage());
@@ -464,6 +465,7 @@ public final class Main {
                     ctx.raizEntry, dondeBuscar, ctx.stdlibDir));   /* V7 #623: la stdlib no entra en un pack librería */
             System.out.println("pack generado: " + packPath);
         }
+        if (success) traeLosDeFuera(ctx);   // V9 #903: tras el pack, que se cierra por su cuenta (PackStep)
         return success;
     }
 
@@ -483,6 +485,68 @@ public final class Main {
      */
     static String nombreCanonico(String library, String name) {
         return (library == null || library.isEmpty()) ? name : library + "." + name;
+    }
+
+    /**
+     * V9 #903 — LO QUE EL PROGRAMA USA Y NO ES SUYO, JUNTO A ÉL. En el PC, las VMs buscan un módulo en la carpeta del
+     * programa, en la stdlib y en los packs (#493, el orden de Eduardo). Uno ya compilado que vive en otro sitio —un
+     * dispositivo de bpdevices, una carpeta de "dependencies", un `from "…"`— el compilador lo encontraba y las VMs no:
+     * compilaba y al ejecutarlo, «falta el modulo». A una placa sí llegaba (es del programa: el IDE lo sube con él,
+     * Despliegue.dependencias) y en un pack también (PackStep lo cierra). Aquí, lo mismo: su copia en outDir —y con él,
+     * lo que él importa—, si no está o si el original ha cambiado.
+     */
+    private static void traeLosDeFuera(Ctx ctx) {
+        if (ctx.outDir == null) return;
+        Path out = ctx.outDir.toAbsolutePath().normalize();
+        Path stdlib = ctx.stdlibDir == null ? null : ctx.stdlibDir.toAbsolutePath().normalize();
+        java.util.ArrayDeque<Path> cola = new java.util.ArrayDeque<>(ctx.modsUsados.values());
+        Set<Path> vistos = new LinkedHashSet<>();
+        while (!cola.isEmpty()) {
+            Path mod = cola.poll().toAbsolutePath().normalize();
+            Path dir = mod.getParent();
+            if (!vistos.add(mod) || dir == null || dir.equals(out)) continue;
+            if (stdlib != null ? dir.equals(stdlib) : Files.isRegularFile(dir.resolve("Core.mod"))) continue;   // la stdlib
+            try {
+                byte[] bytes = Files.readAllBytes(mod);
+                Path copia = out.resolve(mod.getFileName());
+                if (!Files.isRegularFile(copia) || !java.util.Arrays.equals(bytes, Files.readAllBytes(copia))) {
+                    Files.write(copia, bytes);
+                    System.out.println("  de fuera : " + mod.getFileName() + ", junto al programa (es de " + dir + ")");
+                }
+                String base = mod.getFileName().toString().replaceFirst("[.]mod$", "");
+                Path dbg = dir.resolve(base + ".dbg");
+                if (Files.isRegularFile(dbg))   // para que su traza diga las líneas
+                    Files.copy(dbg, out.resolve(dbg.getFileName()), java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                for (String dueno : PackStep.duenosDeImports(bytes)) {   // y los suyos: de su carpeta, o de las otras
+                    if (Files.isRegularFile(out.resolve(dueno + ".mod"))
+                            || stdlib != null && Files.isRegularFile(stdlib.resolve(dueno + ".mod"))) continue;
+                    Path suyo = dir.resolve(dueno + ".mod");
+                    for (Path d : ctx.dependencyPaths)
+                        if (!Files.isRegularFile(suyo) && Files.isDirectory(d)) suyo = d.resolve(dueno + ".mod");
+                    if (Files.isRegularFile(suyo)) cola.add(suyo);
+                }
+            } catch (IOException e) {
+                diag().println("aviso: no se pudo dejar " + mod.getFileName() + " junto al programa: " + e.getMessage());
+            }
+        }
+    }
+
+    /** V9 #903 — un `.mod` de outDir que es la COPIA de uno de fuera ({@link #traeLosDeFuera}): si el original ha cambiado
+     *  —una instalación nueva—, manda el original, y la copia se rehace al acabar. Con su fuente en el proyecto no es una
+     *  copia: es suyo, y manda él. */
+    private static Path originalDeLaCopia(Path enOut, Ast.ImportNode imp, String modName, Path importerDir, Ctx ctx) {
+        try {
+            if (locateBpSource(joinPath(imp.path), libraryFromImportPath(imp), imp.path.get(imp.path.size() - 1), null,
+                    importerDir.resolve("_"), ctx) != null) return enOut;
+            Path yo = enOut.toAbsolutePath().normalize();
+            for (Path dep : ctx.dependencyPaths) {
+                Path o = Files.isDirectory(dep) ? dep.resolve(modName) : dep;
+                if (!o.getFileName().toString().equals(modName) || o.toAbsolutePath().normalize().equals(yo)) continue;
+                if (carriesInterface(o))
+                    return java.util.Arrays.equals(Files.readAllBytes(o), Files.readAllBytes(enOut)) ? enOut : o;
+            }
+        } catch (IOException e) { /* no se pudo mirar: la de siempre */ }
+        return enOut;
     }
 
     /** H6.a-lite — borra los .bpi que este build escribió. Sólo los nuestros:
@@ -757,6 +821,7 @@ public final class Main {
                 boolean ok = compileFull(p, ctx, /*depth*/0);
                 boolean success = ok && ctx.totalErrors == 0;
                 if (success && ctx.pruneBpi) pruneWrittenBpi(ctx);
+                if (success) traeLosDeFuera(ctx);   // V9 #903
                 System.exit(success ? 0 : 2);
             } else {
                 // Sin --compile ni --interface: sólo diagnósticos del raíz.
@@ -2014,7 +2079,7 @@ public final class Main {
             if (carriesInterface(enStdlib)) return enStdlib;
         }
         Path candidate = ctx.outDir.resolve(modName);
-        if (carriesInterface(candidate)) return candidate;
+        if (carriesInterface(candidate)) return originalDeLaCopia(candidate, imp, modName, importerDir, ctx);
         Path sib = importerDir.resolve(modName);
         if (carriesInterface(sib)) return sib;
         for (Path dep : ctx.dependencyPaths) {

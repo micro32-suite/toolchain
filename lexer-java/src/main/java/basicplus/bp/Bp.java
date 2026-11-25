@@ -4,6 +4,7 @@
 package basicplus.bp;
 
 import basicplus.frontend.BpBuild;
+import basicplus.frontend.DependenciasDelMod;
 import basicplus.frontend.EscritorApi;
 import basicplus.frontend.Main;
 import basicplus.frontend.ModuleInterface;
@@ -383,8 +384,28 @@ public final class Bp {
         boolean laEncuentraSola = suyo.sourcePath != null;
         VmConfig cfg = laEncuentraSola ? suyo : (instalacion != null ? instalacion : suyo);
         String stdlib = (cfg.stdlibDir != null && !cfg.stdlibDir.isEmpty()) ? cfg.stdlibDir : null;
+        boolean conPacks = false;
+        for (String o : opcionesDeLaVm) conPacks |= o.startsWith("--pack");
+        if (!conPacks && mod.toString().toLowerCase(Locale.ROOT).endsWith(".mod")) dilosDeLosPacks(fichero, mod, stdlib);
         return vmC ? conLaVmC(mod, argumento, stdlib, opcionesDeLaVm)
                    : conLaVmJava(mod, argumento, laEncuentraSola ? null : stdlib, opcionesDeLaVm);
+    }
+
+    /** V9 #904 — un módulo que sólo está en un pack (SQLite) compila, y las VMs del PC no lo cargan: lo que dirán es
+     *  «falta el modulo 'SQLite'». Se dice antes qué pasa y dónde va (por la salida de errores). */
+    private static void dilosDeLosPacks(Path fichero, Path mod, String stdlib) {
+        try {
+            List<Path> donde = new ArrayList<>();
+            if (mod.getParent() != null) donde.add(mod.getParent());
+            for (String falta : DependenciasDelMod.faltan(mod, donde, stdlib == null ? null : Paths.get(stdlib))) {
+                Path carpeta = fichero.toAbsolutePath().normalize().getParent();
+                Main.InterfazHallada h = Main.interfazDeUnImport(falta, carpeta);
+                if (h == null || !h.origen.startsWith("el pack ")) continue;
+                System.err.println("bp run: '" + falta + "' viene en " + h.origen.replaceFirst(" \\(.*", "") + ", que las VMs del"
+                        + " PC no cargan; en el micro simulado sí: bp run --sim " + fichero);
+                return;   // con uno basta: los demás serán de lo mismo
+            }
+        } catch (IOException e) { /* sólo era una ayuda */ }
     }
 
     // ---- la placa y el micro simulado (V9 #857: «Java, en bp, sobre lo del IDE») ----

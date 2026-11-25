@@ -392,4 +392,98 @@ class MensajesQueEnsenanTest {
         jc(tmp, "      string s = String.valueOf(3);\n", "las cadenas se tratan con funciones; de un número, intToString(n)");
         jc(tmp, "      Collections.Map m = Collections.stringMap();\n      m.put(\"a\", 5);\n", "Un número va en su caja, new Integer(x)");
     }
+
+    // ---------------------------------------------------------------- V9 #904, la segunda vuelta
+
+    @Test @DisplayName("BP: los operadores de Java y de C")
+    void operadoresDeJava(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    var a: integer := 16\n    print a >> 2\n", "en BP el desplazamiento es 'shr': a shr 2");
+        bp(tmp, "    var a: integer := 16\n    print a >>> 2\n", "en BP el desplazamiento es 'shr'");
+        bp(tmp, "    var a: integer := 1\n    print a << 4\n", "en BP el desplazamiento es 'shl'");
+        bp(tmp, "    var a: integer := 16\n    a >>= 2\n", "en BP es 'shr=': x shr= 2");
+        bp(tmp, "    var a: integer := 1\n    a <<= 2\n", "en BP es 'shl=': x shl= 2");
+        bp(tmp, "    if true && false then print 1\n", "en BP '&&' es 'and'");
+        bp(tmp, "    if true || false then print 1\n", "en BP '||' es 'or'");
+        bp(tmp, "    var a: boolean := true\n    if !a then print 1\n", "en BP '!' es 'not'");
+        bp(tmp, "    print 7 % 3\n", "en BP '%' es 'mod': a mod b");
+        bp(tmp, "    print ~7\n", "BP no tiene el '~', el no de bits: x xor -1");
+        bp(tmp, "    var a: integer := 7\n    print a > 3 ? 1 : 2\n", "BP no tiene el '? :'");
+        bp(tmp, "    var o: Object := List()\n    if o is List then print 1\n", "en BP es 'instanceof'");
+        bp(tmp, "    var d: double := 3.7d\n    print (integer) d\n", "en BP una conversión se escribe como una función: integer(x)");
+        bp(tmp, "    var l: List := new List()\n", "en BP no hay 'new': se escribe List(…)");
+        bp(tmp, "    var v: integer[] := new integer[5]\n", "en BP no hay 'new': se escribe integer[n]");
+    }
+
+    @Test @DisplayName("BP: un error de ésos no trae otros detrás")
+    void unoSolo(@TempDir Path tmp) throws IOException {
+        for (String c : new String[] { "print 16 >> 2", "print 7 % 3", "if true && !false then print 1", "var l: List := new List()",
+                "var s: string := 'hola'", "var d: double := 3.7d\n    print (integer) d" }) {
+            String m = compila(tmp, ".bp", "module T\n  function Main()\n    " + c + "\n  end Main\nend T\n");
+            int n = m.split("error ", -1).length - 1;
+            assertEquals(c.contains("&&") ? 2 : 1, n, c + ":\n" + m);
+        }
+    }
+
+    @Test @DisplayName("BP: las cadenas y los comentarios de otros lenguajes")
+    void cadenasYComentarios(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    var s: string := 'hola'\n", "en BP las cadenas van entre comillas dobles");
+        bp(tmp, "    ' un comentario de los BASIC\n    print 1\n", "en BP un comentario va con //");
+        bp(tmp, "    print 1 ' y al final\n", "en BP un comentario va con //");
+        bp(tmp, "    # un comentario de Python\n", "en BP un comentario va con //");
+        bp(tmp, "    REM un comentario de los BASIC\n", "en BP un comentario va con //");
+        bp(tmp, "    var a: integer := 3\n    print $\"a={a}\"\n", "BP no tiene las cadenas $");
+        bp(tmp, "    var s: string := \"abc\"\n    print s[0]\n", "un carácter es charAt(s, i), y su código, charCodeAt(s, i)");
+    }
+
+    @Test @DisplayName("BP: una variable puede llamarse rem, is, new o select")
+    void susNombres(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    var rem: integer[] := [1, 2]\n    rem[0] := 3\n    rem[1] += 4\n    var is: integer := 2\n    is mod= 2\n"
+                + "    var new: integer := is + 1\n    var select: integer := new\n    print (is) + new\n    print rem[0], select\n"
+                + "    noEsta()\n", "no se puede llamar a 'noEsta'");
+        String m = compila(tmp, ".bp", "module T\n  function Main()\n    var rem: integer := 1\n    rem := 3\n    rem += 4\n    rem -= 1\n"
+                + "    rem mod= 4\n    print rem\n    noEsta()\n  end Main\nend T\n");
+        assertEquals(1, m.split("error ", -1).length - 1, m);
+    }
+
+    @Test @DisplayName("BP: else if, el for de C y el select case")
+    void sentencias(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    var a: integer := 3\n    if a == 1 then\n      print 1\n    else if a == 2 then\n      print 2\n    endif\n",
+                "en BP va junto: elseif");
+        bp(tmp, "    for (i := 0; i < 3; i++)\n      print i\n    next i\n", "el 'for' de BP cuenta o recorre: for i := 0 to n - 1 do");
+        bp(tmp, "    var a: integer := 3\n    select case a\n      case 3\n        print 1\n    endsw\n", "en BP es 'switch': switch x");
+    }
+
+    @Test @DisplayName("BP y JC: las excepciones de Java y de C#")
+    void excepciones(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    throw RuntimeException(\"x\")\n", "no se puede llamar a 'RuntimeException': en BP es 'RuntimeError'");
+        bp(tmp, "    try\n      print 1\n    catch e: NullPointerException\n      print 2\n    endtry\n",
+                "'NullPointerException' no es una clase: en BP es 'NullReferenceError'");
+        jc(tmp.resolve("j"), "      throw new RuntimeException(\"x\");\n", "no se puede llamar a 'RuntimeException': en JC es 'RuntimeError'");
+        jc(tmp.resolve("j"), "      try { println(1); } catch (IOException e) { println(2); }\n", "en JC es 'IOError'");
+        jc(tmp.resolve("j"), "      try { println(1); } catch (IOError | CastError e) { println(2); }\n", "un catch por cada excepción: catch (IOError e)");
+    }
+
+    @Test @DisplayName("una estática sin su clase, y el main de una clase")
+    void estaticas(@TempDir Path tmp) throws IOException {
+        String m = compila(tmp, ".jc", "module T\n{\n   class A\n   {\n      public static function int f() { return 1; }\n"
+                + "      public function int g() { return f(); }\n   }\n   function void Main() { println(f()); }\n}\n");
+        assertTrue(m.contains("no se puede llamar a 'f': es de la clase, y se llama con su nombre, A.f(…)"), m);
+        assertTrue(m.contains("no se puede llamar a 'f': está en la clase 'A', y se llama A.f(…)"), m);
+        m = compila(tmp, ".jc", "module T\n{\n   class A\n   {\n      public static function void main(string[] args) { f(); }\n   }\n}\n");
+        assertTrue(m.contains("no define 'main' ni 'Main' (no podrá ser módulo principal): el de la clase 'A' no vale; va en el"
+                + " módulo, fuera de las clases, function void main()"), m);
+        bp(tmp.resolve("b"), "    println(\"x\")\n", "para escribir en la consola, print x");
+        bp(tmp.resolve("b"), "    print System.currentTimeMillis()\n", "los milisegundos, now()");
+        bp(tmp.resolve("b"), "    var s: string := nil\n", "en BP es 'null'");
+    }
+
+    @Test @DisplayName("JC: synchronized, lock, as, >>> y el nombre de un bucle")
+    void jcDeOtros(@TempDir Path tmp) throws IOException {
+        jc(tmp, "      synchronized (this) { println(1); }\n", "JC no tiene 'synchronized': un Mutex, con lock() y unlock()");
+        jc(tmp, "      lock (this) { println(1); }\n", "JC no tiene 'lock': un Mutex");
+        jc(tmp, "      Object o = new List();\n      List l = o as List;\n", "JC no tiene 'as': una conversión se escribe (List) x");
+        jc(tmp, "      int a = 16;\n      println(a >>> 2);\n", "JC no tiene el '>>>'");
+        jc(tmp, "      fuera: for (int i = 0; i <= 3; i++) { break fuera; }\n",
+                "en JC el nombre de un bucle va detrás de su palabra: for fuera");
+    }
 }

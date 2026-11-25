@@ -89,6 +89,7 @@ public class Main {
                      * de Java, antes de cargar nada de AWT. Con escritorio, la GUI abría su ventana y Gui.run() esperaba
                      * a que la cerraran: un proceso que lanza otro programa (una IA, un script) se quedaba colgado. */
                     System.setProperty("java.awt.headless", "true");
+                    edu.bpgenvm.gui.GuiBackend.fueraDePantalla = true;   // V9 #906: Gui.shot captura igual
                     break;
                 case "--config":
                     if (i + 1 >= args.length) {

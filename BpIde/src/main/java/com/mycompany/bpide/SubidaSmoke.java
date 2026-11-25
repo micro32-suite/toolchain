@@ -12,7 +12,9 @@
 //      y en el listado con su tamaño;
 //   5. borra lo subido;
 //   6. (V9 #899) un programa en un .pack, subido como lo sube el Run on Device (Despliegue)
-//      dos veces seguidas: las dos se queda en la placa (la segunda lo borraba).
+//      dos veces seguidas: las dos se queda en la placa (la segunda lo borraba);
+//   7. (V9 #907) una librería que la placa tiene en otra compilación, en /lib: si el programa no
+//      enlaza con ella («presente pero no exporta»), se dice de dónde la carga y qué hacer.
 //
 // Uso:
 //   java -cp BpIde/target/BpIde-6.0.jar com.mycompany.bpide.SubidaSmoke <COMx | host:puerto> [KB]
@@ -49,6 +51,33 @@ public final class SubidaSmoke {
             }
             b.del("/app/subida/Subida.pack");
         } finally {
+            b.close();
+        }
+    }
+
+    /** V9 #907 — con {@code stdlib}, la carpeta de la biblioteca: un módulo suyo, retocado, en el /lib de la placa. */
+    private static void laPista(String destino, String stdlib) throws Exception {
+        File log = new File(stdlib, "Log.mod");
+        if (!log.isFile()) { System.out.println("  (sin " + log + ": la pista, sin probar)"); return; }
+        byte[] otro = Files.readAllBytes(log.toPath());
+        otro[otro.length - 1] ^= 1;   // otra compilación: el mismo formato y la misma versión, otro CRC
+        File prog = new File(Files.createTempDirectory("pista").toFile(), "Pista.mod");
+        Files.write(prog.toPath(), new byte[64]);
+        boolean serie = destino.toUpperCase().startsWith("COM") || destino.startsWith("/dev/");
+        Backend b = serie ? new SerialBackend() : new RedBackend();
+        b.connect(destino);
+        try {
+            b.put("/lib/Log.mod", otro);
+            Despliegue d = new Despliegue();
+            d.sube(b, ((AbstractBpvmBackend) b).debugClient(), null, prog, Arrays.asList(log),
+                    java.util.Collections.singleton("Log.mod"), null, "/app", s -> { });
+            String p = d.pista("exit 1 (lib 'Log' presente pero no exporta 'Log.nueva()' (la usa 'P'; version vieja?)) en 2 ms");
+            mira(p.contains("la placa carga 'Log' de /lib/Log.mod"), "la pista de una librería de otra compilación: " + p);
+            mira(d.pista("exit 1 (lib 'Str' presente pero no exporta 'Str.x()' (la usa 'P'; version vieja?))").isEmpty()
+                    && d.pista("exit 0 (OK)").isEmpty() && d.pista(null).isEmpty(), "... y ninguna si no es eso");
+        } finally {
+            b.del("/lib/Log.mod");
+            b.del("/app/Pista.mod");
             b.close();
         }
     }
@@ -108,6 +137,7 @@ public final class SubidaSmoke {
             c.deleteFile(ruta, 10_000);
         }
         elPackSeQueda(destino);
+        laPista(destino, args.length > 2 ? args[2] : "bpstdlib");
         System.out.println(fallos == 0 ? "[status=OK]" : "[status=FAIL]");
         System.exit(fallos == 0 ? 0 : 1);
     }
