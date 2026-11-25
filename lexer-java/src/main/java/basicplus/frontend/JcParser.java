@@ -18,6 +18,8 @@
 //     comparación no cuenta (puntos 22 y 23);
 //   - una declaración de varios nombres con algún valor da uno por nombre,
 //     como los grupos de BP (punto 5).
+// Lo que en Java o en C# se escribe de otra manera se reconoce, y el error dice
+// cómo es en JC (V9 #860: «en JC es 'is'», y no «se esperaba ')'»).
 // El primer error para el parser: no hay recuperación. El compilador lee un
 // `.jc` con este parser y sigue con el árbol como si viniera de un `.bp`.
 // ============================================================
@@ -113,10 +115,12 @@ final class JcParser {
         return sb.toString();
     }
 
-    private JcLexer.Error error(String msg) {
-        Tok t = actual();
-        return new JcLexer.Error(msg, t.linea, t.columna, false);
-    }
+    private JcLexer.Error error(String msg) { return errorEn(actual(), msg); }
+
+    private static JcLexer.Error errorEn(Tok t, String msg) { return new JcLexer.Error(msg, t.linea, t.columna, false); }
+
+    /** Un nombre que en Java o en C# es una palabra del lenguaje, y en JC no: `instanceof`, `throws`, `abstract`… */
+    private boolean esNombre(String s) { return esNombre() && actual().texto.equals(s); }
 
     // ============================================================
     // MÓDULO E IMPORTS
@@ -129,7 +133,8 @@ final class JcParser {
             library = (String) avanza().valor;
             espera(";");
         }
-        espera("module", "'module' al principio del fichero");
+        espera("module", "'module' al principio del fichero (un .jc es un módulo, module Nombre { … }, con los import y las"
+                + " clases dentro)");
         boolean isInterface = acepta("interface");
         String name = nombre("el nombre del módulo");
         String implementsName = null;
@@ -173,7 +178,10 @@ final class JcParser {
         Tok tok = espera("import");
         List<String> path = new ArrayList<>();
         path.add(nombre("el nombre del módulo"));
-        while (acepta(".")) path.add(nombre("un nombre tras '.'"));
+        while (acepta(".")) {
+            if (es("*")) throw error("import nombra un módulo, sin '*': import Collections;");
+            path.add(nombre("un nombre tras '.'"));
+        }
         String boundImpl = null;
         if (acepta(":")) boundImpl = nombrePunteado("el módulo que implementa la interfaz");
         String fromPath = null, packName = null, marcaNativa = null;
@@ -245,7 +253,9 @@ final class JcParser {
             }
         }
         if (clase == null && (isProtected || isStatic))
-            throw error((isStatic ? "'static'" : "'protected'") + " sólo va en un miembro de una clase");
+            throw error((isStatic ? "'static'" : "'protected'") + " sólo va en un miembro de una clase"
+                    + (isStatic ? "; una función del módulo no lo lleva: function void f()" : ""));
+        deOtroLenguaje();
         if (es("class")) {
             if (clase != null) throw error("una clase dentro de otra: BP no las tiene");
             ClassDef cd = claseDef(isPublic, isRoot);
@@ -286,18 +296,123 @@ final class JcParser {
             return;
         }
         // Lo demás empieza por un tipo: una propiedad (si sigue una llave) o variables.
+        if (es("void") && mira(1).tipo == Tipo.NOMBRE) throw error(sinFunction("void " + mira(1).texto));
+        if (clase != null && esNombre(clase) && mira(1).es("("))
+            throw error("un constructor lleva 'function' delante: function " + clase + "(…)");
+        Tok t0 = actual();
         TypeRef tipo = tipo();
         Tok n = actual();
         String nombre = nombre("el nombre de la variable o de la propiedad");
+        if (es("(")) throw errorEn(t0, sinFunction(escrito(t0, n) + " " + nombre));
         if (es("{")) {
             defs.add(propiedad(isPublic, isPrivate, isFinal, isSync, isOwner, tipo, nombre, n, deClase));
             return;
         }
+        if (isFinal) throw errorEn(t0, sinFinal("const " + escrito(t0, n) + " " + nombre + " = …"));
         if (isSync) throw error("'sync' sólo se aplica a una propiedad");
         for (VarDecl v : variables(isPublic, isOwner, tipo, n, nombre, deClase)) {
             v.isPrivate = isPrivate;
             defs.add(v);
         }
+    }
+
+    // ---- V9 #860 (H1.9): lo que en Java o en C# se escribe de otra manera, y cómo es en JC ----
+
+    /** Lo que va delante de un miembro en otro lenguaje. */
+    private void deOtroLenguaje() {
+        if (es("var")) throw error(sinVar());
+        if (es("<"))
+            throw error("JC no tiene los genéricos propios: el tipo de lo que guarda una clase va delante, @element{Tipo}");
+        if (esNombre("using") || esNombre("package") || esNombre("namespace"))
+            throw error("en JC un módulo se nombra con module, y se importa con import: import Collections;");
+        if (!esNombre() || !(mira(1).tipo == Tipo.RESERVADA || mira(1).tipo == Tipo.NOMBRE && mira(2).tipo == Tipo.NOMBRE))
+            return;   // lo de abajo, sólo como modificador: con un tipo y un nombre detrás
+        if (esNombre("abstract"))
+            throw error("JC no tiene 'abstract'; para que una clase tenga que escribir un método, una interfaz");
+        if (esNombre("override") || esNombre("virtual"))
+            throw error("en JC no va '" + actual().texto + "': todo método es virtual, y se redefine escribiéndolo con su misma"
+                    + " firma (con @override{} delante, si se quiere)");
+        if (esNombre("synchronized"))
+            throw error("JC no tiene 'synchronized': un Mutex, con lock() y unlock(), o una propiedad sync");
+    }
+
+    private String sinFunction(String cabecera) {
+        return (clase != null ? "un método" : "una función") + " lleva 'function' delante del tipo: function " + cabecera + "(…)";
+    }
+
+    private static String sinFinal(String como) {
+        return "lo que no cambia es una constante: " + como + " ('final' va en una clase, en un método o en una propiedad)";
+    }
+
+    /** `final int K = 3;` es `const int K = 3;`. */
+    private JcLexer.Error conFinal() {
+        Tok f = espera("final");
+        String como = "const int K = 3";
+        if (esDeclaracion()) {
+            Tok t0 = actual();
+            tipo();
+            como = "const " + escrito(t0, actual()) + " " + actual().texto + " = …";
+        }
+        return errorEn(f, sinFinal(como));
+    }
+
+    /** Lo escrito desde `desde` hasta antes de `hasta`: un tipo. */
+    private String escrito(Tok desde, Tok hasta) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = toks.indexOf(desde); toks.get(i) != hasta; i++) {
+            sb.append(toks.get(i).texto);
+            if (toks.get(i).es(",")) sb.append(' ');
+        }
+        return sb.toString();
+    }
+
+    /** `var x = 5;` es `int x = 5;`: con su tipo, si el valor lo dice. */
+    private String sinVar() {
+        String tipo = "T", x = mira(1).tipo == Tipo.NOMBRE ? mira(1).texto : "x";
+        if (mira(2).es("=")) {
+            Tok v = mira(3);
+            if (v.tipo == Tipo.ENTERO) tipo = "int";
+            else if (v.tipo == Tipo.LARGO) tipo = "long";
+            else if (v.tipo == Tipo.FLOTANTE) tipo = "float";
+            else if (v.tipo == Tipo.DOBLE) tipo = "double";
+            else if (v.tipo == Tipo.CADENA) tipo = "string";
+            else if (v.es("true") || v.es("false")) tipo = "bool";
+            else if (v.es("new") && mira(4).tipo == Tipo.NOMBRE) tipo = mira(4).texto;
+        }
+        return "en JC una variable se declara con su tipo, no con 'var': " + tipo + " " + x + " = …";
+    }
+
+    /** `class P extends Item implements Forma` es `class P : Item, Forma`. */
+    private String conDosPuntos(String cabecera) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = pos; i < toks.size() && !toks.get(i).es("{") && toks.get(i).tipo != Tipo.FIN; i++) {
+            Tok t = toks.get(i);
+            if (t.es("extends") || t.es("implements") || t.es(",")) sb.append(sb.length() == 0 ? " : " : ", ");
+            else sb.append(t.texto);
+        }
+        return "en JC la clase base y las interfaces van tras ':', como en C#: " + cabecera + sb;
+    }
+
+    /** `for (T x : c)`, el de Java, es `foreach (var x in c)`. */
+    private void recorridoDeJava() {
+        int aqui = pos;
+        Tok t = actual();
+        acepta("final");
+        boolean empieza = es("var") || esDeclaracion();
+        if (empieza && !acepta("var")) tipo();
+        boolean deJava = empieza && esNombre() && mira(1).es(":");
+        String x = deJava ? actual().texto : "x";
+        String c = deJava && mira(2).tipo == Tipo.NOMBRE && mira(3).es(")") ? mira(2).texto : "…";
+        pos = aqui;
+        if (deJava) throw errorEn(t, "en JC lo que se recorre va con foreach: foreach (var " + x + " in " + c + ")");
+    }
+
+    /** Una lambda, `() -> …`, `x => …`, `(a, b) => …`. */
+    private boolean esLambda() {
+        int tras = esNombre() ? pos + 1 : es("(") ? cierre() + 1 : 0;
+        if (tras <= 0 || tras + 1 >= toks.size()) return false;
+        Tok a = toks.get(tras), b = toks.get(tras + 1);
+        return (a.es("-") || a.es("=")) && b.es(">") && a.linea == b.linea && a.columna + 1 == b.columna;
     }
 
     /** `public class Perro : Animal, IMascota { … }` (punto 34). Como en C#, el padre y las interfaces van en la misma
@@ -308,9 +423,13 @@ final class JcParser {
         String name = nombre("el nombre de la clase");
         String base = null;
         List<String> interfaces = new ArrayList<>();
+        if (es("extends") || es("implements")) throw error(conDosPuntos("class " + name));
+        if (es("<"))
+            throw error("JC no tiene los genéricos propios: el tipo de lo que guarda la clase va delante, @element{Tipo}");
         if (acepta(":")) {
             base = nombreDeTipo("la clase base tras ':'");
             while (acepta(",")) interfaces.add(nombreDeTipo("una interfaz tras ','"));
+            if (es("implements")) throw error("las interfaces van en la misma lista que la clase base, tras una ','");
         }
         espera("{", "'{' tras la cabecera de la clase");
         List<ITopLevelDecl> members = miembros(name, "la clase");
@@ -327,6 +446,7 @@ final class JcParser {
         Tok tok = espera("interface");
         String name = nombre("el nombre de la interfaz");
         List<String> padres = new ArrayList<>();
+        if (es("extends") || es("implements")) throw error(conDosPuntos("interface " + name));
         if (acepta(":")) {
             padres.add(nombreDeTipo("una interfaz tras ':'"));
             while (acepta(",")) padres.add(nombreDeTipo("una interfaz tras ','"));
@@ -391,6 +511,9 @@ final class JcParser {
     private Annotation anotacion() {
         Tok at = espera("@");
         String nombre = nombre("el nombre de la anotación tras '@'");
+        if ("Override".equals(nombre) && !es("{"))
+            throw errorEn(at, "en JC no hace falta: un método redefine al de la base con su misma firma; si se quiere marcar,"
+                    + " @override{}");
         espera("{", "'{' tras '@" + nombre + "' (las llaves van aunque no lleven nada)");
         List<AnnEntry> entradas = new ArrayList<>();
         while (!es("}")) {
@@ -447,6 +570,7 @@ final class JcParser {
         while (true) {
             IExpr tamano = null;
             if (acepta("[")) {
+                if (es("]")) throw error("los corchetes sin tamaño van con el tipo: int[] " + nm);
                 if (tipo instanceof ArrayTypeRef) throw error("un array de tamaño fijo es de un tipo simple: int nums[10]");   // punto 33
                 tamano = expresion();
                 espera("]");
@@ -604,6 +728,7 @@ final class JcParser {
             while (acepta(",")) ps.add(parametro());
         }
         espera(")");
+        if (esNombre("throws")) throw error("JC no declara las excepciones de una función: 'throws' no va");
         // `: base(…)` y `: this(…)`: la primera sentencia del constructor de BP, `super(…)` o la delegación.
         IStmt inicial = null;
         if (acepta(":")) {
@@ -676,6 +801,7 @@ final class JcParser {
             body.add(new InlineStmt(mnem, ops, it.linea, it.columna));
             intrinseca = true;
         } else {
+            if (es("=") && mira(1).es(">")) throw error("JC no tiene los cuerpos con =>: { return …; }");
             body = bloque();
         }
         if (inicial != null) {
@@ -691,6 +817,7 @@ final class JcParser {
     }
 
     private Param parametro() {
+        if (es("final")) throw error("un parámetro no lleva 'final'");
         boolean esVar = acepta("var");                 // V8/H7.4: `var int n`
         TypeRef tp = tipo();
         Tok n = actual();
@@ -727,6 +854,8 @@ final class JcParser {
             }
             base = new SimpleTypeRef(n, t.linea, t.columna);
             if (es("<")) ((SimpleTypeRef) base).argumentos = argumentosDeTipo();   // V8/H7.2 (#749)
+        } else if (es("var")) {
+            throw error(sinVar());
         } else {
             throw error("se esperaba un tipo, encontrado " + t);
         }
@@ -742,6 +871,7 @@ final class JcParser {
      *  en C# y en Java, y aquí no tiene forma. */
     private IExpr arrayNuevo(IExpr tipo) {
         Tok op = espera("[", "'[' tras el tipo: new int[n]");
+        if (es("]")) throw error("new T[n] lleva el tamaño; con los elementos escritos, sin new: [1, 2, 3]");
         IExpr tam = expresion();
         espera("]");
         if (es("[")) throw error("un array de arrays no se crea con new: tras 'new A[n]' no va otro '['");
@@ -754,6 +884,7 @@ final class JcParser {
      *  análisis. */
     private List<TypeRef> argumentosDeTipo() {
         espera("<");
+        if (es(">")) throw error("JC no tiene el <> de Java: los tipos se escriben, new List<Integer>()");
         List<TypeRef> args = new ArrayList<>();
         args.add(tipo());
         while (acepta(",")) args.add(tipo());
@@ -818,6 +949,13 @@ final class JcParser {
     private void sentencia(List<IStmt> out) {
         Tok t = actual();
         if (es("{")) throw error("un bloque suelto: en JC, como en BP, un bloque va con su if, while, for…");
+        if (es("final")) throw conFinal();
+        if (es("var") && mira(1).tipo == Tipo.NOMBRE) throw error(sinVar());
+        if ((es("super") || es("this")) && mira(1).es("("))
+            throw error("el constructor " + (es("super") ? "de la base" : "de la misma clase") + " se llama en la cabecera, como en"
+                    + " C#: function " + (clase != null ? clase : "Clase") + "(…) : " + (es("super") ? "base" : "this") + "(…)");
+        if (esNombre("System") && mira(1).es(".") && mira(3).es(".") && (mira(4).es("print") || mira(4).es("println")))
+            throw error("en JC es println(x), con el salto de línea, o print(x), sin él");
         if (es("if"))       { out.add(si()); return; }
         if (es("while"))    { out.add(mientras()); return; }
         if (es("do"))       { out.add(hacer()); return; }
@@ -940,6 +1078,7 @@ final class JcParser {
         Tok t = espera("for");
         String nombreDelBucle = esNombre() ? nombre("el nombre del bucle") : null;   // V8/H8: `for miLoop (int i = 0; …) { … }`
         espera("(");
+        recorridoDeJava();
         espera("int", "'int': la variable del for es un int, como en BP");   // punto 11
         String i = nombre("el nombre de la variable del for");
         espera("=");
@@ -1235,6 +1374,9 @@ final class JcParser {
      *  debajo de `||` y asociativo por la derecha, como en C#. */
     private IExpr expresion() {
         IExpr c = o();
+        if (asignacionDe(actual()) != null)
+            throw error("una asignación es una sentencia, no va dentro de una expresión"
+                    + (es("=") ? " (para comparar, ==)" : ""));
         if (!es("?")) return c;
         Tok q = avanza();
         IExpr si = expresion();
@@ -1310,6 +1452,8 @@ final class JcParser {
             if (es("<") || es(">") || es("<=") || es(">=")) {
                 Tok op = avanza();
                 l = new BinaryExpr(op.texto, l, desplazamiento(), op.linea, op.columna);
+            } else if (esNombre("instanceof")) {
+                throw error("en JC es 'is', como en C#");
             } else if (es("is")) {
                 Tok op = avanza();
                 l = new InstanceOfExpr(l, nombrePunteado("el nombre de una clase tras 'is'"), op.linea, op.columna);
@@ -1359,6 +1503,7 @@ final class JcParser {
     /** La potencia, `**` (punto 18): la base, primaria; el exponente, unario, que la hace asociativa por la derecha. */
     private IExpr potencia() {
         IExpr base = postfijo();
+        if (es("++") || es("--")) throw error("++ y -- sólo como sentencia, no dentro de una expresión: v++; aparte");
         if (es("**")) {
             Tok op = avanza();
             return new BinaryExpr("^", base, unario(), op.linea, op.columna);
@@ -1452,6 +1597,8 @@ final class JcParser {
 
     private IExpr primario() {
         Tok t = actual();
+        if (esLambda()) throw error("JC no tiene lambdas: un método, con objeto::metodo (this::pulsado)");
+        if (es("{")) throw error("los elementos de un array van entre corchetes: [1, 2, 3]");
         switch (t.tipo) {
             case ENTERO:   avanza(); return new IntLitExpr((Long) t.valor, t.linea, t.columna);
             case LARGO:    avanza(); return new LongLitExpr((Long) t.valor, t.linea, t.columna);

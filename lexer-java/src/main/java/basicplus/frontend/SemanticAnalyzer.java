@@ -85,6 +85,177 @@ public final class SemanticAnalyzer {
         return " — `" + n + "` vive en `Core`: este módulo necesita `import Core`";
     }
 
+    // ============================================================
+    // V9 #860 (H1.9) — LOS MENSAJES QUE ENSEÑAN: tras el fallo, cómo se escribe. Cada ayuda es el final de un
+    // mensaje, o cadena vacía si no hay nada cierto que decir.
+    // ============================================================
+    /** Las carpetas donde el compilador busca los módulos (la stdlib, los dispositivos…), para {@link #pistaNombre}. */
+    private List<java.nio.file.Path> carpetasDeModulos = new ArrayList<>();
+
+    void carpetasDeModulos(List<java.nio.file.Path> carpetas) { carpetasDeModulos = carpetas; }
+
+    private boolean importa(String modulo) {
+        for (Symbol.ImportedNamespaceSymbol ns : preloadedImports)
+            if (modulo.equals(ns.moduleName)) return true;
+        return false;
+    }
+
+    /** Un tipo con el nombre que le da otro lenguaje (Java, C#, el C de toda la vida; y, en BP, JC). */
+    private String pistaTipo(String n) {
+        switch (n) {
+            case "String":                                return enEsteLenguajeEs("string");
+            case "int": case "bool": case "ushort": case "sbyte":
+                return enJc ? "" : enEsteLenguajeEs("int".equals(n) ? "integer" : "bool".equals(n) ? "boolean"
+                        : "ushort".equals(n) ? "word" : "int8");
+            case "object":                                return enEsteLenguajeEs("Object");
+            case "char":
+                return enJc ? ": en JC no hay char; 'a' es su código, un int"
+                            : ": en BP no hay char; el código de un carácter es un integer, charCodeAt(s, i)";
+            case "void":                                  return enJc ? "" : ": una función que no devuelve nada no lleva tipo";
+            case "ArrayList": case "LinkedList": case "Vector": case "IList":
+                return enEsteLenguajeEs("List");
+            case "Map": case "HashMap": case "TreeMap": case "Hashtable": case "Dictionary":
+                return (enEsteLenguajeEs("Collections.Map")) + (importa("Collections") ? "" : ", con import Collections");
+            default:                                      return "";
+        }
+    }
+
+    private String enEsteLenguajeEs(String como) { return ": en " + (enJc ? "JC" : "BP") + " es '" + como + "'"; }
+
+    /** Un nombre que no es de aquí: si es de un módulo que se importa, cómo se escribe; si es el de un módulo que hay y no
+     *  se importa, el import que falta; y la consola de Java y de C#. */
+    private String pistaNombre(String n) {
+        for (Symbol s : module.members.getSymbols()) {
+            if (!(s instanceof Symbol.ImportedNamespaceSymbol)) continue;
+            Symbol.ImportedNamespaceSymbol ns = (Symbol.ImportedNamespaceSymbol) s;
+            if (ns.classes.containsKey(n) || ns.functions.containsKey(n) || ns.enums.containsKey(n)
+                    || ns.consts.containsKey(n) || ns.properties.containsKey(n))
+                return ": está en '" + ns.name + "', y se escribe " + ns.name + "." + n;
+        }
+        if ("System".equals(n) || "Console".equals(n))
+            return ": para escribir en la consola, " + (enJc ? "println(x)" : "print x");
+        if ("String".equals(n)) return ": las cadenas se tratan con funciones; de un número, intToString(n)";
+        for (java.nio.file.Path d : carpetasDeModulos)
+            if (!importa(n) && java.nio.file.Files.isRegularFile(d.resolve(n + ".mod")))
+                return ": hay un módulo '" + n + "'; falta import " + n;
+        return "";
+    }
+
+    /** Una función del lenguaje, para quien la escribe como un método (`Integer.parseInt(s)`): `parseInt(s)`. */
+    private String pistaFuncion(String n) {
+        Symbol s = module.members.resolve(n);
+        return s instanceof FunctionSymbol && ((FunctionSymbol) s).ownerClass == null
+                ? ": es una función, " + conSusNombres((FunctionSymbol) s) : "";
+    }
+
+    /** `substring(s, start, hasta)`: una función con los nombres de sus parámetros. */
+    private static String conSusNombres(FunctionSymbol f) {
+        List<String> ns = new ArrayList<>();
+        for (ParamSymbol p : f.params) ns.add(p.name);
+        return f.name + "(" + String.join(", ", ns) + ")";
+    }
+
+    /** Un valor que no es un objeto (un string, un número, un array) tratado como si lo fuera: la función que es. */
+    private String pistaDeValor(BpType tipo, String m) {
+        boolean medida = "length".equalsIgnoreCase(m) || "size".equalsIgnoreCase(m) || "count".equalsIgnoreCase(m);
+        if (tipo instanceof ArrayType) return medida ? ": se escribe len(v)" : "";
+        if (tipo == PrimitiveType.STRING) {
+            String igual = enJc ? "==" : "=";
+            if (medida) return ": se escribe len(s)";
+            if ("isEmpty".equals(m)) return ": se escribe len(s) " + igual + " 0";
+            if ("equals".equalsIgnoreCase(m)) return ": se comparan con " + igual + ", que mira el texto";
+            if ("concat".equalsIgnoreCase(m)) return ": se unen con +";
+            String f = m.toLowerCase(java.util.Locale.ROOT);
+            if (f.startsWith("toupper") || "ucase".equals(f)) f = "upper";
+            else if (f.startsWith("tolower") || "lcase".equals(f)) f = "lower";
+            else if ("substr".equals(f) || "mid".equals(f)) f = "substring";
+            else if ("replaceall".equals(f)) f = "replace";
+            else if ("codepointat".equals(f)) f = "charcodeat";
+            for (Symbol.ImportedNamespaceSymbol ns : preloadedImports) {
+                if (!"Core".equals(ns.moduleName)) continue;
+                for (FunctionSymbol g : ns.functions.values())
+                    if (g.name.equalsIgnoreCase(f) && !g.params.isEmpty() && g.params.get(0).type == PrimitiveType.STRING)
+                        return ": es una función, " + conSusNombres(g);
+            }
+            return ": las cadenas se tratan con funciones, len(s), upper(s), substring(s, start, hasta)…";
+        }
+        if (tipo instanceof PrimitiveType && "toString".equalsIgnoreCase(m)) {
+            String f = tipo == PrimitiveType.LONG ? "longToString" : tipo == PrimitiveType.FLOAT ? "floatToString"
+                     : tipo == PrimitiveType.DOUBLE ? "doubleToString" : tipo == PrimitiveType.BOOLEAN ? "boolToString"
+                     : "intToString";
+            return ": es una función, " + f + "(x)";
+        }
+        return "";
+    }
+
+    /** Lo público de una clase, suyo y heredado (sin lo de Object, que lo tiene todo objeto): lo que se puede usar desde
+     *  fuera, para el mensaje de lo que no existe o no se ve. {@code deClase}: lo que va con el nombre de la clase. */
+    private static String loPublicoDe(ClassSymbol cls, boolean deClase) {
+        Set<String> nombres = new java.util.TreeSet<>();
+        for (ClassSymbol c : cls.dondeBuscar()) {
+            if (c != cls && "Object".equals(c.name) && c.esDelLenguaje()) continue;
+            for (Symbol s : (deClase ? c.staticMembers : c.instanceMembers).getSymbols()) {
+                if (s.name.startsWith("__")) continue;
+                String corto = s.name.substring(s.name.lastIndexOf('.') + 1);
+                if (s instanceof FunctionSymbol) {
+                    boolean publica = c.isInterface;
+                    for (FunctionSymbol f = (FunctionSymbol) s; f != null; f = f.nextOverload) publica |= f.isPublic;
+                    if (publica && !((FunctionSymbol) s).isConstructor) nombres.add(corto + "()");
+                } else if (s instanceof PropertySymbol) {
+                    if (c.isInterface || ((PropertySymbol) s).isPublic) nombres.add(corto);
+                } else if (s instanceof ConstSymbol) {
+                    if (((ConstSymbol) s).isPublic) nombres.add(corto);
+                }
+            }
+        }
+        if (nombres.isEmpty()) return "";
+        List<String> dichos = new ArrayList<>(nombres);
+        String mas = "";
+        if (dichos.size() > 16) {
+            mas = "…";
+            dichos = dichos.subList(0, 16);
+        }
+        return "lo público de '" + cls.name + "' es " + String.join(", ", dichos) + mas;
+    }
+
+    private static String trasDosPuntos(String s) { return s.isEmpty() ? "" : ": " + s; }
+
+    /** Un número (o un boolean) donde va un objeto: su caja. */
+    private String pistaCaja(BpType destino, BpType origen, int line, int column) {
+        if (!(destino instanceof ClassType) || !(origen instanceof PrimitiveType) || origen == PrimitiveType.STRING) return "";
+        BpType caja = cajaDe((PrimitiveType) origen, new SimpleTypeRef("Object", line, column));
+        return caja != null && destino.isAssignableFrom(caja)
+                ? ": un " + (origen == PrimitiveType.BOOLEAN ? "boolean" : "número") + " va en su caja, "
+                        + (enJc ? "new " : "") + caja.display() + "(x)"
+                : "";
+    }
+
+    /** Las firmas que hay, cuando ninguna encaja; y la caja, si con ella encajaría. */
+    private String lasQueHay(String name, List<FunctionSymbol> cands, List<BpType> at, int line, int column) {
+        List<String> firmas = new ArrayList<>();
+        for (FunctionSymbol c : cands) firmas.add(firmaDe(name, c));
+        String mas = "";
+        if (firmas.size() > 8) {
+            mas = " y " + (firmas.size() - 8) + " más";
+            firmas = firmas.subList(0, 8);
+        }
+        String caja = "";
+        for (FunctionSymbol c : cands) {
+            if (!caja.isEmpty() || c.params.size() != at.size()) continue;
+            String suya = "";
+            boolean encajaria = true;
+            for (int i = 0; i < at.size() && encajaria; i++) {
+                BpType pt = c.params.get(i).type, a = at.get(i);
+                if (pt == null || a == null || a instanceof ErrorType || pt.isAssignableFrom(a)) continue;
+                String p = pistaCaja(pt, a, line, column);
+                encajaria = !p.isEmpty();
+                if (encajaria) suya = p;
+            }
+            if (encajaria) caja = suya;
+        }
+        return "; las que hay: " + String.join(", ", firmas) + mas + (caja.isEmpty() ? "" : ". " + caja.substring(2, 3).toUpperCase() + caja.substring(3));
+    }
+
     /**
      * Anti-cascada: tipos ya reportados como "no encontrado" (1 vez por nombre).
      * Un tipo mal escrito usado en N declaraciones daba N errores; ahora 1.
@@ -1982,7 +2153,7 @@ public final class SemanticAnalyzer {
             return new EnumType((EnumSymbol) fromImports);
         if (!avisa) return null;
         if (reportedUnknownType.add(st.name))
-            err(st.line, st.column, "tipo '" + st.name + "' no encontrado" + pistaCore(st.name));
+            err(st.line, st.column, "tipo '" + st.name + "' no encontrado" + pistaCore(st.name) + pistaTipo(st.name));
         return ErrorType.INSTANCE;
     }
 
@@ -3687,7 +3858,7 @@ public final class SemanticAnalyzer {
         if (sym == null) {
             // Anti-cascada: reportar cada nombre no resuelto UNA vez.
             if (reportedUnresolved.add(id.name))
-                err(id.line, id.column, "identificador no resuelto: '" + id.name + "'" + pistaCore(id.name));
+                err(id.line, id.column, "identificador no resuelto: '" + id.name + "'" + pistaCore(id.name) + pistaNombre(id.name));
             return ErrorType.INSTANCE;
         }
         info.exprSymbols.put(id, sym);
@@ -3757,7 +3928,9 @@ public final class SemanticAnalyzer {
                 ClassSymbol cs = (ClassSymbol) idSym;
                 Symbol sub = cs.lookupStatic(ma.member);
                 if (sub == null) {
-                    err(ma.line, ma.column, "'" + cs.name + "' no tiene miembro estático '" + ma.member + "'");
+                    String funcion = pistaFuncion(ma.member);
+                    err(ma.line, ma.column, "'" + cs.name + "' no tiene miembro estático '" + ma.member + "'"
+                            + (funcion.isEmpty() ? trasDosPuntos(loPublicoDe(cs, true)) : funcion));
                     return ErrorType.INSTANCE;
                 }
                 if (!seMiraEnLaLlamada(ma, sub)) checkVisibility(ma.line, ma.column, sub, cs);
@@ -3816,7 +3989,8 @@ public final class SemanticAnalyzer {
             ClassType ct = (ClassType) tgtT;
             Symbol sub = ct.cls.lookupInstance(ma.member);
             if (sub == null) {
-                err(ma.line, ma.column, "'" + ct.cls.name + "' no tiene miembro de instancia '" + ma.member + "'");
+                err(ma.line, ma.column, "'" + ct.cls.name + "' no tiene miembro de instancia '" + ma.member + "'"
+                        + trasDosPuntos(loPublicoDe(ct.cls, false)));
                 return ErrorType.INSTANCE;
             }
             if (!seMiraEnLaLlamada(ma, sub))
@@ -3839,7 +4013,7 @@ public final class SemanticAnalyzer {
         }
 
         if (tgtT instanceof ErrorType) return ErrorType.INSTANCE;
-        err(ma.line, ma.column, "el tipo '" + tgtT.display() + "' no tiene miembros");
+        err(ma.line, ma.column, "el tipo '" + tgtT.display() + "' no tiene miembros" + pistaDeValor(tgtT, ma.member));
         return ErrorType.INSTANCE;
     }
 
@@ -4424,7 +4598,8 @@ public final class SemanticAnalyzer {
         // (`len(s: string)` y `len(a: any[])`, en Core.bp) y se resuelven como cualquier otra.
         for (IExpr a : ce.args) analyzeExpr(a, scope, null);
         if (target == null && ce.callee instanceof IdentifierExpr)
-            err(ce.line, ce.column, "no se puede llamar a '" + ((IdentifierExpr) ce.callee).name + "'");
+            err(ce.line, ce.column, "no se puede llamar a '" + ((IdentifierExpr) ce.callee).name + "'"
+                    + pistaNombre(((IdentifierExpr) ce.callee).name));
         return ErrorType.INSTANCE;
     }
 
@@ -4524,7 +4699,8 @@ public final class SemanticAnalyzer {
             BpType t = analyzeExpr(args.get(i), scope, ps.get(i).type);
             if (ps.get(i).type != null && !ps.get(i).type.isAssignableFrom(t)) {
                 Node nn = (Node) args.get(i);
-                err(nn.line, nn.column, "argumento " + (i + 1) + ": '" + t.display() + "' no asignable a '" + ps.get(i).type.display() + "'");
+                err(nn.line, nn.column, "argumento " + (i + 1) + ": '" + t.display() + "' no asignable a '" + ps.get(i).type.display() + "'"
+                        + pistaCaja(ps.get(i).type, t, nn.line, nn.column));
             }
         }
         for (int i = n; i < args.size(); i++) analyzeExpr(args.get(i), scope, null);
@@ -4562,7 +4738,7 @@ public final class SemanticAnalyzer {
         for (FunctionSymbol c : cands) if (overloadMatchCost(c, at) >= 0) encajan.add(c);
         if (encajan.isEmpty()) {
             err(line, column, "ninguna sobrecarga de '" + name
-                    + "' acepta los argumentos " + argTypeList(at));
+                    + "' acepta los argumentos " + argTypeList(at) + lasQueHay(name, cands, at, line, column));
             return null;
         }
         // V8 #772 (Eduardo, 3-nov: «como en Java»; y su ejemplo: «Si haces un try ... catch, las excepciones hay que
@@ -4807,7 +4983,9 @@ public final class SemanticAnalyzer {
                 // los dos lados (`and` y `or` se saltan el segundo). Un boolean es 0 o 1: la operación de bits es la lógica.
                 if (!"shl".equals(op) && !"shr".equals(op) && isBoolean(lt) && isBoolean(rt)) return PrimitiveType.BOOLEAN;
                 err(line, column, "'" + visto + "' requiere integer/long"
-                    + ("shl".equals(op) || "shr".equals(op) ? "" : ", o dos boolean"));
+                    + ("shl".equals(op) || "shr".equals(op) ? "" : ", o dos boolean")
+                    + ("&".equals(op) && (lt == PrimitiveType.STRING || rt == PrimitiveType.STRING)
+                            ? "; las cadenas se unen con +" : ""));
                 return ErrorType.INSTANCE;
             case "and": case "or":
                 if (PrimitiveType.BOOLEAN.isAssignableFrom(lt) && PrimitiveType.BOOLEAN.isAssignableFrom(rt))
@@ -5236,11 +5414,13 @@ public final class SemanticAnalyzer {
                     + owner.name + "', de otra clase. " + ((sub instanceof VarSymbol)
                         ? "Léelo por una property pública suya."
                         : "Hazlo 'public' si tiene que usarse sobre otros objetos.");
-        return "'" + sub.name + "' es protegido de '"
-                    + (clase != null ? clase.name : "?") + "': lo ven esa clase y sus"
-                    + " descendientes, no desde fuera. " + ((sub instanceof VarSymbol)
-                        ? "Léelo por una property pública suya (un campo no puede ser public)."
-                        : "Hazlo 'public' si tiene que usarse desde cualquier sitio.");
+        // V9 #860 — si la clase es de otro módulo, quien la usa no la puede cambiar: lo que tiene público
+        String suyo = clase != null && clase.isExternal ? loPublicoDe(owner != null ? owner : clase, false) : "";
+        String desdeFuera = !suyo.isEmpty() ? "; " + suyo
+                : sub instanceof VarSymbol ? ". Léelo por una property pública suya (un campo no puede ser public)."
+                : ". Hazlo 'public' si tiene que usarse desde cualquier sitio.";
+        return "'" + sub.name + "' es protegido de '" + (clase != null ? clase.name : "?")
+                + "': lo ven esa clase y sus descendientes, no desde fuera" + desdeFuera;
     }
 
     /** #796 — los `x.m` que son el nombre de una llamada: de un método se mira la sobrecarga que se llama, que aquí aún no se

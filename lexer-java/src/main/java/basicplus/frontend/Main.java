@@ -2653,6 +2653,7 @@ public final class Main {
 
     static void loadImportsForAnalyzer(Ast.ModuleNode module, Path importerSrc, Ctx ctx,
                                                SemanticAnalyzer analyzer, int depth) throws IOException {
+        analyzer.carpetasDeModulos(ctx.dependencyPaths);   // V9 #860: para decir el import que falta
         if (module.imports == null || module.imports.isEmpty()) return;
         Path importerDir = importerSrc.toAbsolutePath().getParent();
         // L2 v3.e — recolectamos todos los namespaces que se cargan para

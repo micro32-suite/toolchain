@@ -426,6 +426,11 @@ public final class Parser {
             error("una función no puede ser 'intrinsic' y 'native' a la vez");
             isNative = false;
         }
+        // V9 #860 — hasta aquí se tomaba y no hacía nada: quien viene de Java lo escribe queriendo una constante
+        if (isFinal && (tok.type == TokenType.VAR || tok.type == TokenType.CONST
+                || tok.type == TokenType.EVENT || tok.type == TokenType.ENUM))
+            error("'final' va en una clase, en un método o en una property; lo que no cambia es una constante:"
+                    + " const K: integer := 3");
         switch (tok.type) {
             case CONST:    return parseConstDecl(isPublic);
             case VAR: {
@@ -484,6 +489,12 @@ public final class Parser {
                         msg += " — BP no tiene '" + tok.lexeme + "': un miembro de clase se"
                              + " cualifica con la clase, p. ej. 'public function Caja.metodo()'"
                              + " o 'public const Caja.MAX: integer := 10'";
+                    } else if ("protected".equalsIgnoreCase(tok.lexeme)) {
+                        msg += " — en BP un miembro sin marca ya es protegido";
+                    } else if ("sub".equalsIgnoreCase(tok.lexeme)) {
+                        msg += " — en BP es 'function', sin tipo si no devuelve nada: function f() … end f";
+                    } else if ("dim".equalsIgnoreCase(tok.lexeme)) {
+                        msg += " — en BP es 'var': var x: integer";
                     }
                     error(msg);
                 }
@@ -501,7 +512,7 @@ public final class Parser {
         DeclName name = parseDeclName();
         TypeRef type = null;
         if (match(TokenType.COLON)) type = parseType();
-        consume(TokenType.ASSIGN, "se esperaba ':=' en la declaración de la constante");
+        if (!asigna()) consume(TokenType.ASSIGN, "se esperaba ':=' en la declaración de la constante");
         IExpr value = parseExpr();
         consumeStmtTerminator("se esperaba ';' o salto de línea tras la constante");
         return new ConstDecl(isPublic, name, type, value, tok.line, tok.column);
@@ -549,7 +560,7 @@ public final class Parser {
         consume(TokenType.COLON, "se esperaba ':' tras el nombre de la variable");
         TypeRef type = parseType();
         IExpr init = null;
-        if (match(TokenType.ASSIGN)) init = parseExpr();
+        if (asigna()) init = parseExpr();
         return new VarDecl(isPublic, isOwner, names, type, init, tok.line, tok.column);
     }
 
@@ -822,7 +833,7 @@ public final class Parser {
         TypeRef t = parseType();
         // H8.1 — valor por defecto opcional: `nombre: tipo := <literal>`
         IExpr def = null;
-        if (match(TokenType.ASSIGN)) def = parseExpr();
+        if (asigna()) def = parseExpr();
         Param p = new Param(n, t, def, tok.line, tok.column);
         p.isVar = esVar;
         return p;
@@ -885,7 +896,7 @@ public final class Parser {
         consume(TokenType.COLON, "se esperaba ':' tras el nombre de la propiedad");
         TypeRef type = parseType();
         IExpr init = null;
-        if (match(TokenType.ASSIGN)) init = parseExpr();
+        if (asigna()) init = parseExpr();
 
         // Forma corta: ';' | NEWLINE   -> get/set implícitos
         if (match(TokenType.SEMICOLON))
@@ -1056,7 +1067,7 @@ public final class Parser {
         Token tok = current();
         String n = consumeIdentifier("nombre del miembro del enum");
         Long explicitVal = null;
-        if (match(TokenType.ASSIGN)) {
+        if (asigna()) {
             Token lit = current();
             if (lit.type == TokenType.INTEGER_LIT && lit.value instanceof Long) {
                 explicitVal = (Long) lit.value;
@@ -1182,6 +1193,20 @@ public final class Parser {
         }
     }
 
+    private static final String IGUAL_NO_ASIGNA =
+            "'=' no asigna en BP: usa ':='  (el '=' sólo vale dentro de una anotación, `@BD{ clave = valor }`)";
+
+    /** V9 #860 — el `:=` de una declaración o de un `for`. Con un `=` en su sitio, se dice, y se sigue como si fuera `:=`
+     *  (antes, el error del que no lo esperaba y los que venían detrás). */
+    private boolean asigna() {
+        if (check(TokenType.EQUALS)) {
+            error(IGUAL_NO_ASIGNA);
+            advance();
+            return true;
+        }
+        return match(TokenType.ASSIGN);
+    }
+
     private IStmt parseAssignOrCallStmt() {
         Token startTok = current();
         IExpr lhs;
@@ -1206,7 +1231,14 @@ public final class Parser {
         // que falta, en vez de dejar un mensaje genérico: es el error más típico
         // de quien viene de otro lenguaje. Mismo criterio que '<>' → '!=' (#265).
         if (check(TokenType.EQUALS)) {
-            error("'=' no asigna en BP: usa ':='  (el '=' sólo vale dentro de una anotación, `@BD{ clave = valor }`)");
+            error(IGUAL_NO_ASIGNA);
+        } else if (lhs instanceof IdentifierExpr && check(TokenType.IDENTIFIER)) {
+            // V9 #860 — dos nombres seguidos: una declaración de otro lenguaje (`dim x as integer`, `let y = 3`, `int z`)
+            String n = ((IdentifierExpr) lhs).name;
+            error("let".equalsIgnoreCase(n) ? "en BP se asigna sin 'let': " + current().lexeme + " := …"
+                    : "en BP una variable se declara con 'var': var " + current().lexeme + ": integer");
+        } else if (check(TokenType.PLUS) || check(TokenType.MINUS)) {
+            error("en BP se suma y se resta con += y -=: x " + (check(TokenType.PLUS) ? "+" : "-") + "= 1");   // `x++` (#860)
         } else {
             error("se esperaba una asignación o una llamada como sentencia");
         }
@@ -1420,7 +1452,7 @@ public final class Parser {
         String iter = consumeIdentifier("nombre del iterador del 'for'");
 
         ForRange range;
-        if (match(TokenType.ASSIGN)) {
+        if (asigna()) {
             IExpr from = parseExpr();
             consume(TokenType.TO, "se esperaba 'to' en el 'for' numérico");
             IExpr to = parseExpr();
