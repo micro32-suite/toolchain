@@ -254,7 +254,7 @@ public final class PlacaCli {
                         return 1;
                     }
                     final int[] dicho = { -10 };
-                    PacksPlaca.Grabado g = PacksPlaca.graba(dc, f, 0, PlacaCli::err, (hechos, total) -> {
+                    PacksPlaca.Grabado g = PacksPlaca.graba(dc, f, Despliegue.Perfil.NINGUNO, PlacaCli::err, (hechos, total) -> {
                         int pct = total > 0 ? (int) ((hechos * 100L) / total) : 100;
                         if (pct < dicho[0] + 10) return;
                         dicho[0] = pct;

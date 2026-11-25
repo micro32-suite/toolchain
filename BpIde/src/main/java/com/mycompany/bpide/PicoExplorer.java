@@ -137,7 +137,7 @@ public final class PicoExplorer extends JPanel {
         this.comandos = comandos;
         registraComandos();
         entorno = new EntornoPlaca(comandos, this::debugClient, this::quePlaca, this::emitLine);
-        packs = new PacksPlaca(comandos, this::debugClient, this::deviceArch, this::quePlaca,
+        packs = new PacksPlaca(comandos, this::debugClient, this::perfil, this::quePlaca,
                 this::reconectarTrasReinicio, this::emitLine);
 
         // Toolbar 3 filas: backend radio | endpoint (port/host) + connect |

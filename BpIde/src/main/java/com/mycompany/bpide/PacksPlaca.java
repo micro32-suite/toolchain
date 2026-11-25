@@ -18,7 +18,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
-import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 import javax.swing.JOptionPane;
 import javax.swing.SwingUtilities;
@@ -57,19 +56,19 @@ public final class PacksPlaca {
 
     private final Comandos comandos;
     private final Supplier<BpvmClient> cliente;
-    private final IntSupplier arch;
+    private final Supplier<Despliegue.Perfil> perfil;
     private final Supplier<String> quePlaca;
     private final Reconecta reconecta;
     private final Consumer<String> consola;
     private final List<Mirador> mirando = new CopyOnWriteArrayList<>();
 
-    /** `cliente`, el de la conexión de ahora (null sin ella); `arch`, la de la placa (0: se le pregunta); `quePlaca`, cómo
-     *  se la llama al preguntar por ella; `consola`, la del IDE, desde cualquier hilo. */
-    public PacksPlaca(Comandos comandos, Supplier<BpvmClient> cliente, IntSupplier arch, Supplier<String> quePlaca,
-                      Reconecta reconecta, Consumer<String> consola) {
+    /** `cliente`, el de la conexión de ahora (null sin ella); `perfil`, lo que dijo la placa de su nativo (NINGUNO: se le
+     *  pregunta); `quePlaca`, cómo se la llama al preguntar por ella; `consola`, la del IDE, desde cualquier hilo. */
+    public PacksPlaca(Comandos comandos, Supplier<BpvmClient> cliente, Supplier<Despliegue.Perfil> perfil,
+                      Supplier<String> quePlaca, Reconecta reconecta, Consumer<String> consola) {
         this.comandos = comandos;
         this.cliente = cliente;
-        this.arch = arch;
+        this.perfil = perfil;
         this.quePlaca = quePlaca;
         this.reconecta = reconecta;
         this.consola = consola != null ? consola : s -> { };
@@ -122,9 +121,9 @@ public final class PacksPlaca {
     /**
      * Graba un pack en la placa: avisa de lo que le faltará, lo prepara para ella (V5/H8: se queda con el motor de su
      * familia y lo sella para la dirección que ella le da, que no se sabe hasta que elige el hueco: entre el BEGIN y los
-     * datos) y lo manda por trozos. `archConocida`, la arquitectura que publicó la placa (0: se le pregunta).
+     * datos) y lo manda por trozos. `conocido`, lo que dijo la placa de su nativo (NINGUNO: se le pregunta).
      */
-    public static Grabado graba(BpvmClient c, File f, int archConocida, Consumer<String> log,
+    public static Grabado graba(BpvmClient c, File f, Despliegue.Perfil conocido, Consumer<String> log,
                                 BpvmClient.BurnProgress avance) throws IOException {
         final byte[] img = Files.readAllBytes(f.toPath());
         final BpvmClient.PackTable antes = c.packList(T);
@@ -142,7 +141,7 @@ public final class PacksPlaca {
         List<BpvmClient.PackInfo> habia = new ArrayList<>();
         for (BpvmClient.PackInfo pi : antes.packs) if (pi.active && pi.name.equals(nombre)) habia.add(pi);
 
-        final basicplus.frontend.PackBurn.Preparado prep = prepara(c, img, archConocida, log);
+        final basicplus.frontend.PackBurn.Preparado prep = prepara(c, img, conocido, log);
         final byte[] aGrabar = (prep != null) ? prep.bytes : img;
         long off = c.packBurn(aGrabar, T_FLASH, (flashAddr, ramBase, ramSize) -> {
             if (prep == null || !prep.necesitaDireccion) return aGrabar;
@@ -223,33 +222,25 @@ public final class PacksPlaca {
      * todavía, se le pregunta aquí (el valor se guarda al conectar con una petición asíncrona, que puede no haber
      * llegado).</p>
      */
-    private static basicplus.frontend.PackBurn.Preparado prepara(BpvmClient c, byte[] img, int archConocida,
+    private static basicplus.frontend.PackBurn.Preparado prepara(BpvmClient c, byte[] img, Despliegue.Perfil conocido,
                                                                   Consumer<String> log) throws IOException {
-        int a = archConocida;
-        if (a == 0) {
-            Map<String, Object> inf;
+        Despliegue.Perfil p = conocido;
+        if (p.arch == 0) {
             try {
-                inf = c.getInfo(T);
+                p = Despliegue.Perfil.delInfo(c.getInfo(T));
             } catch (IOException io) {
                 throw new IOException("la placa no responde al INFO (" + io.getMessage() + "). Sin eso no se puede saber qué"
                         + " motor grabar. Reinicia la placa y vuelve a conectar; comprueba con el botón INFO antes de"
                         + " grabar.", io);
             }
-            Object v = (inf != null) ? inf.get("arch") : null;
-            /* Número O cadena, igual que `PicoExplorer.ilong`: según el camino, un entero puede llegar de las dos formas. */
-            if (v instanceof Number) a = ((Number) v).intValue();
-            else if (v != null) {
-                try { a = Integer.parseInt(v.toString().trim()); } catch (NumberFormatException ignore) { }
-            }
-            if (a != 0) log.accept("[Packs] la placa dice arch=" + a + " (" + PicoExplorer.archName(a) + ")");
         }
-        String nombreArch = PicoExplorer.archName(a);
-        basicplus.frontend.NpackReloc.Destino d = basicplus.frontend.NpackReloc.porTargetAot(nombreArch);
+        String que = PicoExplorer.archName(p.arch) + (p.receta.isEmpty() ? "" : " " + p.receta);
+        basicplus.frontend.NpackReloc.Destino d = destino(p);
         /* Arquitectura desconocida o sin motor nativo (el Xtensa del S3): se graba SIN nativo (Eduardo, 22-ago: «lleve nativo
          * o no, el pack se graba; lo unico, si el nativo no existe o no se corresponde con el del micro, se graba SIN
          * nativo»). `podar` quita todo lo nativo y lo dice. */
         if (d == null) {
-            log.accept("[Packs] la placa es '" + (nombreArch.isEmpty() ? "(no la dice)" : nombreArch)
+            log.accept("[Packs] la placa es '" + (que.trim().isEmpty() ? "(no la dice)" : que.trim())
                     + "': no hay motor nativo para ella, se grabará SIN nativo");
         }
         try {
@@ -259,6 +250,15 @@ public final class PacksPlaca {
         } catch (basicplus.frontend.PackBurn.BurnException be) {
             throw new IOException(be.getMessage(), be);
         }
+    }
+
+    /** De qué familia es el motor que se graba en esa placa; null, ninguno. V9 #892 — por la RECETA que publica (desde V7
+     *  H2, #441): por la arquitectura no se distinguen la P4 (RISC-V con FPU) y la C3, la C5 y la C6 (sin ella), y hasta V9
+     *  en estas tres se grababa el motor de la P4, que la placa rechaza, o ninguno. Sin receta (una imagen de antes de V7),
+     *  por la arquitectura, como siempre. */
+    static basicplus.frontend.NpackReloc.Destino destino(Despliegue.Perfil p) {
+        return !p.receta.isEmpty() ? basicplus.frontend.NpackReloc.porReceta(p.receta)
+                : basicplus.frontend.NpackReloc.porTargetAot(PicoExplorer.archName(p.arch));
     }
 
     /** El resumen de la zona, en una línea (la del panel). */
@@ -402,7 +402,7 @@ public final class PacksPlaca {
         }
         if (!f.isFile()) return noVale(p, "no existe el fichero " + f);
         avance("grabando " + f.getName() + "…");
-        return cambiando(p, c -> graba(c, f, arch.getAsInt(), consola, (hechos, total) -> {
+        return cambiando(p, c -> graba(c, f, perfil.get(), consola, (hechos, total) -> {
             final int pct = total > 0 ? (int) ((hechos * 100L) / total) : 0;
             avance("grabando " + f.getName() + "… " + pct + " %  (" + (hechos / 1024) + "/" + (total / 1024) + " KB)");
         }), g -> {

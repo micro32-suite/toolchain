@@ -91,13 +91,35 @@ public final class PacksSmoke {
         final boolean[] contesta = { false };
         Comandos cs = new Comandos(null);
         cs.setPreguntador(t -> { preguntas.add(t); return contesta[0]; });   // sin diálogos en la pantalla
-        PacksPlaca packs = new PacksPlaca(cs, conexion::get, () -> 0, () -> "placa de prueba en el simulado",
+        PacksPlaca packs = new PacksPlaca(cs, conexion::get, () -> Despliegue.Perfil.NINGUNO,
+                () -> "placa de prueba en el simulado",
                 (alVolver, alFallar) -> alFallar.accept("no hay explorador en la prueba"), consola::add);
         List<String> avances = java.util.Collections.synchronizedList(new ArrayList<>());
         packs.mira(new PacksPlaca.Mirador() {
             @Override public void zona(BpvmClient.PackTable t) { avances.add("zona " + t.packs.size()); }
             @Override public void avance(String que) { avances.add(que); }
         });
+
+        // 0. el motor que le toca a cada placa, por lo que publica (V9 #892): la P4 y la C5 son las dos «riscv»
+        String[][] placas = { { "40", "ARMV8M_MAIN_SOFTFP", "ARMV8" }, { "243", "RV32IMAFC_ILP32F", "RISCV" },
+            { "243", "RV32IMC_ILP32", "RV32IMC" }, { "94", "", "nada" }, { "0", "", "nada" }, { "243", "OTRA", "nada" },
+            { "40", "", "ARMV8" } };
+        for (String[] x : placas) {
+            basicplus.frontend.NpackReloc.Destino d = PacksPlaca.destino(
+                    new Despliegue.Perfil(Integer.parseInt(x[0]), 0, x[1], 9));
+            mira((d == null ? "nada" : d.sufijo).equals(x[2]), "arch " + x[0] + ", receta «" + x[1] + "»: " + x[2]);
+        }
+        for (String[] x : new String[][] { { "Gui", "ARMV8,RISCV,RV32IMC" }, { "GuiMini", "RV32IMC" },
+            { "DriverSpi", "RV32IMC" }, { "SQLite", "ARMV8,RISCV" } }) {
+            byte[] img = Files.readAllBytes(PacksPlaca.deLaInstalacion(x[0]).toPath());
+            StringBuilder con = new StringBuilder();
+            for (String[] pl : new String[][] { placas[0], placas[1], placas[2] }) {
+                basicplus.frontend.PackBurn.Preparado prep = basicplus.frontend.PackBurn.podar(img,
+                        PacksPlaca.destino(new Despliegue.Perfil(Integer.parseInt(pl[0]), 0, pl[1], 9)));
+                if (prep.necesitaDireccion) con.append(con.length() > 0 ? "," : "").append(pl[2]);
+            }
+            mira(con.toString().equals(x[1]), x[0] + " lleva motor para " + con);
+        }
 
         // 1. sin placa
         for (String id : new String[] { "packs_listar", "packs_formatear" }) {

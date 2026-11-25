@@ -209,6 +209,7 @@ public final class Guiones {
 
         private void hecho(Guion.Paso paso, Resultado r) {
             String mensaje = r.mensaje == null ? "" : r.mensaje;
+            if (mensaje.startsWith(paso.comando.id + ": ")) mensaje = mensaje.substring(paso.comando.id.length() + 2);
             consola.accept("[guion]     " + (r.ok ? "bien" : "MAL") + ": " + mensaje.split("\n", 2)[0]);
             Map<String, Object> m = new LinkedHashMap<>();
             m.put("linea", paso.linea);
