@@ -125,10 +125,15 @@ public final class PicoExplorer extends JPanel {
      *  que usa quien lo llame por su nombre). */
     private final Comandos comandos;
 
+    /** V9 #876 — las variables de entorno de la placa conectada, con sus comandos (las usan los diálogos del entorno). */
+    private final EntornoPlaca entorno;
+    public EntornoPlaca entorno() { return entorno; }
+
     public PicoExplorer(Comandos comandos) {
         super(new BorderLayout());
         this.comandos = comandos;
         registraComandos();
+        entorno = new EntornoPlaca(comandos, this::debugClient, this::emitLine);
 
         // Toolbar 3 filas: backend radio | endpoint (port/host) + connect |
         // acciones.
@@ -2808,16 +2813,20 @@ public final class PicoExplorer extends JPanel {
                             outputSink.accept("[Placa ERROR] " + msg);
                         }
                     }
-                    if (onFailure != null) {
-                        onFailure.accept(msg.contains("BUSY") ? "la placa está ocupada: " + porque + " (si es un"
-                                + " programa en marcha, «parar» lo para; si no, basta con repetirlo)"
-                                : (msg.isEmpty() ? cause.toString() : msg));
-                    }
+                    if (onFailure != null) onFailure.accept(motivo(cause));
                 } finally {
                     setActionButtonsEnabled(true);
                 }
             }
         }.execute();
+    }
+
+    /** V9 #868 — por qué falló una orden a la placa, para quien la pidió: un BUSY, con lo que dice ella. */
+    static String motivo(Throwable causa) {
+        String msg = causa.getMessage() == null ? "" : causa.getMessage();
+        if (!msg.contains("BUSY")) return msg.isEmpty() ? causa.toString() : msg;
+        return "la placa está ocupada: " + msg.replaceFirst("^VM error \\[BUSY\\]:\\s*", "") + " (si es un"
+                + " programa en marcha, «parar» lo para; si no, basta con repetirlo)";
     }
 
     private void setActionButtonsEnabled(boolean enabled) {

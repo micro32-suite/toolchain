@@ -99,6 +99,11 @@ code. Files on the PC: only inside the folder the user allowed.
   has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's library is
   older than this installation's: tell the user to burn this installation's packs on the board (IDE, Packs panel;
   `@INSTALACION@docs/INSTALAR_FIRMWARE.md`).
+- **The board's settings** (its environment variables: the memory for its packs, the panel, the SD card, the radio…)
+  live in its flash, outside its files: `entorno_listar`, `entorno_poner` and `entorno_borrar`. Which ones there are, and
+  their values for each board: appendix A of the reference. Most are read when the board starts: after changing one,
+  `placa_reiniciar` and `placa_conectar`. They are the board's, not the program's: change only what the task needs, and
+  tell the user what there was (`antes`, in the result).
 - **The simulated micro keeps its state** between runs, like a board (its file system and its packs). If it carries
   things from before (old files in `/app`, a library that does not export what the program uses),
   `micro_simulado` with `de_cero: true` empties it (all its files and its packs zone; its configuration, the

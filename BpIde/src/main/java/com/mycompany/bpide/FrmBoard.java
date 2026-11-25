@@ -28,7 +28,6 @@ public class FrmBoard extends javax.swing.JFrame {
     public FrmBoard(BpvmClient client, java.util.function.Consumer<String> log) {
         this();
         if (log != null) {
-            this.logSink = log;
             boardPanel.setLog(log);
             packsPanel.setLog(log);
         }
@@ -74,13 +73,20 @@ public class FrmBoard extends javax.swing.JFrame {
     /* #435 — el cliente vigente, para abrir el diálogo del entorno con él. */
     private BpvmClient clienteActual;
     private EnvDialog envDialog;
-    private java.util.function.Consumer<String> logSink = s -> { };
+    /* V9 #876 — los comandos del IDE y el entorno de la placa conectada: el diálogo no habla con la placa, los llama. */
+    private Comandos comandos;
+    private EntornoPlaca entorno;
+
+    public void setEntorno(Comandos comandos, EntornoPlaca entorno) {
+        this.comandos = comandos;
+        this.entorno = entorno;
+    }
 
     /** Abre (o trae al frente) el diálogo de variables de entorno. Modeless a
      *  propósito: se consulta MIENTRAS se miran las particiones, que es
      *  justamente lo que se perdía al tenerlo todo en la misma ventana. */
     private void abrirEnvDialog() {
-        if (clienteActual == null) {
+        if (clienteActual == null || entorno == null) {
             javax.swing.JOptionPane.showMessageDialog(this,
                     "Sin conexión con la placa.", "Variables de entorno",
                     javax.swing.JOptionPane.INFORMATION_MESSAGE);
@@ -93,7 +99,7 @@ public class FrmBoard extends javax.swing.JFrame {
         }
         // Las particiones viven en el MISMO env (part.<x>.size), así que al
         // tocar una variable se repinta el panel de la izquierda.
-        envDialog = new EnvDialog(this, clienteActual, logSink,
+        envDialog = new EnvDialog(this, comandos, entorno,
                 () -> { if (boardPanel != null) boardPanel.refresh(); });
         envDialog.setVisible(true);
         /* Al frente Y con el foco. Es modeless: sin esto puede quedarse DETRAS

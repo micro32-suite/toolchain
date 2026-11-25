@@ -52,8 +52,9 @@ public final class EnvDialogShot {
             cli.envSet("log", "1", 8000);
 
             final EnvDialog[] dlg = new EnvDialog[1];
-            javax.swing.SwingUtilities.invokeAndWait(() ->
-                    dlg[0] = new EnvDialog(null, cli, s -> System.out.println("  log> " + s), () -> { }));
+            final Comandos cs = new Comandos(null);
+            final EntornoPlaca entorno = new EntornoPlaca(cs, () -> cli, s -> System.out.println("  log> " + s));
+            javax.swing.SwingUtilities.invokeAndWait(() -> dlg[0] = new EnvDialog(null, cs, entorno, () -> { }));
             Thread.sleep(1500);   // el refresh va en hilo de fondo
 
             javax.swing.SwingUtilities.invokeAndWait(() -> {

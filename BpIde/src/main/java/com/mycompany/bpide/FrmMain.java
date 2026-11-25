@@ -2796,7 +2796,8 @@ public class FrmMain extends javax.swing.JFrame
     private boolean autorizaLaPersona(Path carpeta) {
         boolean amplia = carpeta != null && demasiadoAmplia(carpeta);
         StringBuilder t = new StringBuilder("Una IA pide manejar el IDE: abrir, compilar y ejecutar programas, en el PC,"
-                + " en el micro\nsimulado y en las placas que se conecten; y abrir, guardar, subir y bajar ficheros ");
+                + " en el micro\nsimulado y en las placas que se conecten; ver y cambiar las variables de entorno de esas"
+                + " placas;\ny abrir, guardar, subir y bajar ficheros ");
         if (carpeta != null) {
             t.append("dentro de\nesta carpeta y de sus subcarpetas:\n\n   ").append(carpeta).append('\n');
             if (amplia) {
@@ -4694,7 +4695,7 @@ public class FrmMain extends javax.swing.JFrame
             envDialogPrincipal.refresh();
             return;
         }
-        envDialogPrincipal = new EnvDialog(this, client, s -> appendConsola(s + "\n"), () -> { });
+        envDialogPrincipal = new EnvDialog(this, comandos, picoExplorer.entorno(), () -> { });
         envDialogPrincipal.setVisible(true);
         envDialogPrincipal.toFront();
         envDialogPrincipal.requestFocus();
@@ -4709,6 +4710,7 @@ public class FrmMain extends javax.swing.JFrame
             return;
         }
         FrmBoard fb = new FrmBoard(client, s -> appendConsola(s + "\n"));
+        fb.setEntorno(comandos, picoExplorer.entorno());   // V9 #876: su botón «Variables de entorno…»
         /* V5/H8 — la familia de la placa, para grabar packs con motor nativo: hay
          * que elegir qué motor va y relocalizarlo. Se pasa el PROVEEDOR y no el
          * valor porque entre abrir esta ventana y darle a grabar puede haberse
