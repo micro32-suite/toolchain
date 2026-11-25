@@ -4596,9 +4596,12 @@ public final class SemanticAnalyzer {
         // H1 P2c (20-sep) — `len(x)` ya NO es un caso especial: son dos sobrecargas de la raíz
         // (`len(s: string)` y `len(a: any[])`, en Core.bp) y se resuelven como cualquier otra.
         for (IExpr a : ce.args) analyzeExpr(a, scope, null);
-        if (target == null && ce.callee instanceof IdentifierExpr)
-            err(ce.line, ce.column, "no se puede llamar a '" + ((IdentifierExpr) ce.callee).name + "'"
-                    + pistaNombre(((IdentifierExpr) ce.callee).name));
+        if (target == null && ce.callee instanceof IdentifierExpr) {
+            String n = ((IdentifierExpr) ce.callee).name, pista = pistaNombre(n);
+            if (pista.isEmpty() && (currentClass == null || currentClass.lookupInstance(n) == null))   // V9 #860
+                pista = ": no hay ninguna función con ese nombre";
+            err(ce.line, ce.column, "no se puede llamar a '" + n + "'" + pista);
+        }
         return ErrorType.INSTANCE;
     }
 
@@ -4673,6 +4676,18 @@ public final class SemanticAnalyzer {
         return "…";
     }
 
+    /** V9 #860 — ` (addr: integer, reg: integer)`: los parámetros que se esperaban, entre corchetes los que se pueden
+     *  omitir; sin ninguno, nada. */
+    private static String conSusTipos(List<ParamSymbol> ps) {
+        if (ps.isEmpty()) return "";
+        List<String> v = new ArrayList<>();
+        for (ParamSymbol p : ps) {
+            String s = (p.isVar ? "var " : "") + p.name + ": " + (p.type == null ? "?" : p.type.display());
+            v.add(p.defaultExpr == null ? s : "[" + s + "]");
+        }
+        return " (" + String.join(", ", v) + ")";
+    }
+
     private void checkArgs(int line, int col, List<ParamSymbol> ps, List<IExpr> args, Scope scope) {
         // H8.1 — sustitución en el llamante: rellena los args finales omitidos con el
         // valor por defecto de su parámetro (clon del literal). Idempotente: tras
@@ -4688,7 +4703,8 @@ public final class SemanticAnalyzer {
             }
         }
         if (ps.size() != args.size())
-            err(line, col, "número de argumentos incorrecto: se esperaban " + ps.size() + ", se pasaron " + args.size());
+            err(line, col, "número de argumentos incorrecto: se esperaban " + ps.size() + conSusTipos(ps)
+                    + ", se pasaron " + args.size());
         int n = Math.min(ps.size(), args.size());
         for (int i = 0; i < n; i++) {
             if (ps.get(i).isVar || args.get(i) instanceof Ast.MethodRefExpr) {   // V8/H7.4

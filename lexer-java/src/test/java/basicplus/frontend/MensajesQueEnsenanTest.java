@@ -68,6 +68,17 @@ class MensajesQueEnsenanTest {
         bp(tmp, "    var m: Collections.Map := Collections.stringMap()\n    m.put(1, 2, 3)\n", "; las que hay: ");
     }
 
+    @Test @DisplayName("BP: los parámetros que se esperaban, y la función que no hay")
+    void parametros(@TempDir Path tmp) throws IOException {
+        bp(tmp, "    print substring(\"abc\", 1)\n",
+                "número de argumentos incorrecto: se esperaban 3 (s: string, start: integer, ");
+        String m = compila(tmp, ".bp", "module T\n  function f(a: integer, b: string := \"x\")\n  end f\n"
+                + "  function Main()\n    f(1, \"y\", 3)\n    f()\n    mide(3)\n  end Main\nend T\n");
+        assertTrue(m.contains("se esperaban 2 (a: integer, [b: string]), se pasaron 3"), m);
+        assertTrue(m.contains("se esperaban 2 (a: integer, [b: string]), se pasaron 0"), m);
+        assertTrue(m.contains("no se puede llamar a 'mide': no hay ninguna función con ese nombre"), m);
+    }
+
     @Test @DisplayName("BP: un argumento que va en su caja")
     void caja(@TempDir Path tmp) throws IOException {
         String m = compila(tmp, ".bp", "module T\n  import Core\n  function f(o: Object)\n    print o.toString()\n  end f\n"

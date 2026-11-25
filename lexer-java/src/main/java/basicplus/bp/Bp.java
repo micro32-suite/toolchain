@@ -97,7 +97,8 @@ public final class Bp {
         out.println("        compila: el .mod, en <la carpeta del fuente>/out (o en el outDir del proyecto). De los");
         out.println("        errores, los 10 primeros; con --max-errores=0 (aquí, en run y en test), todos");
         out.println("  bp run [--c] [opciones de la VM] <fuente | proyecto.bpbuild | programa.mod> [argumento]");
-        out.println("        compila si hace falta, y ejecuta con la VM Java; con --c, con la VM-C");
+        out.println("        compila si hace falta, y ejecuta con la VM Java; con --c, con la VM-C (un proyecto que");
+        out.println("        sale en pack, en su pack: en el PC, sus resources/ sólo están ahí)");
         out.println("        (sale con el código del programa; si no compila, con 2 y los errores)");
         out.println("        lo que va antes del fichero es para la VM: --no-screen, --screen=240x240…");
         out.println("  bp run --placa=<COM22 | IP de una placa en la red> <fuente | proyecto | programa.mod> [argumento]");
@@ -360,7 +361,10 @@ public final class Bp {
                 if (c.codigo == 2) System.err.println("bp run: no compila; no se ejecuta");
                 return c.codigo;
             }
-            mod = c.mod;
+            /* V9 #900 — un proyecto que sale en pack se ejecuta en su pack, como en el IDE (#310): va cerrado, y en el PC
+             * es donde están sus recursos (Eduardo, 13-nov: «Si hay que subir resources la única manera es hacer un pack
+             * de aplicación que los incluya»). */
+            mod = c.queda != null && c.queda.toString().endsWith(".pack") ? c.queda : c.mod;
             if (mod == null || !Files.isRegularFile(mod)) {
                 System.err.print(new String(lo.toByteArray(), StandardCharsets.UTF_8));
                 System.err.println("bp run: compiló, pero no encuentro " + mod);
@@ -370,15 +374,7 @@ public final class Bp {
         // V9 #857 — en una placa o en el micro simulado: lo hace el IDE (PlacaCli), como su Run on Device
         if (placa != null) {
             Path fuente = fichero.toAbsolutePath().normalize();
-            Path proyecto = nombre.endsWith(".bpbuild") ? fuente : null;
-            if (proyecto != null) {
-                try {   // un proyecto que sale en pack: a la placa va el .pack, cerrado (como en el IDE, #310)
-                    BpBuild proj = BpBuild.load(proyecto);
-                    Path pack = Paths.get(proj.outDir).resolve(proj.packName + ".pack");
-                    if ("pack".equals(proj.out) && Files.isRegularFile(pack)) mod = pack;
-                } catch (IOException ignored) { /* el .mod, como hasta aquí */ }
-            }
-            return conLaPlaca(placa, fuente, mod, argumento, proyecto);
+            return conLaPlaca(placa, fuente, mod, argumento, nombre.endsWith(".bpbuild") ? fuente : null);
         }
         /* La stdlib: la del BpVM.cfg que la VM encontrará sola (el del cwd, o subiendo desde el .mod), y si no hay
          * ninguno, la de la instalación. A la VM Java sólo hay que decírsela en el segundo caso (el cfg de la

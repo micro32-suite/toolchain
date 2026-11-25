@@ -16,8 +16,9 @@ The compiler's and the VMs' messages are in Spanish.
    function does, and how.
 4. `@INSTALACION@samples/*.bp`: about 380 programs that compile. Look for a real use before guessing.
 5. The manual, `@INSTALACION@docs/en/manual.html.md`; the reference, `docs/en/referencia.html.md`; the GUI,
-   `docs/en/gui.html.md`; JC (below), `docs/en/jc.html.md`. In Markdown, made from each `.html` beside it: there the
-   code is plain text, and `grep` finds it. Spanish versions, HTML only, in `docs/`.
+   `docs/en/gui.html.md`; databases (SQL, the ORM and the DAOs the compiler writes), `docs/en/basedatos.html.md`; JC
+   (below), `docs/en/jc.html.md`; the IDE, `docs/en/guia-ide.html.md`. In Markdown, made from each `.html` beside it: there
+   the code is plain text, and `grep` finds it. Spanish versions, HTML only, in `docs/`.
 6. `@INSTALACION@docs/PENDIENTES.md`: what the language does not do yet (in Spanish).
 
 ## Compile and run on the PC (no board, no IDE)
@@ -44,6 +45,9 @@ bp help              # the rest: bp png (a screen capture to PNG), bp frontend a
   function (`  en X.bp:8 (Main)`, `  llamado desde …`).
 - What the program prints on the PC is what it will print on a board: make it print what it does, and check that.
 - Options for the VM go before the program: `bp run --no-screen X.bp` (a GUI without a window; also with `--c`).
+- A project's `resources/` (a `.win` form, images, fonts, data) travel to a board with the program. On the PC the program
+  finds them only in its pack: with `"out": "pack"` in the `.bpbuild`, `bp run App.bpbuild` runs the pack. A test in
+  `tests/`, run from the project's folder, reads them there: `w.load("resources/main.win")`.
 
 ## Tests
 
