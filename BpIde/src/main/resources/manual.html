@@ -2177,9 +2177,16 @@ e.etiqueta := <span class="str">"cuadrado de 2"</span>              <span class=
   ...
 <span class="kw">end</span> Util</code></pre>
 <p>
-  Si declaras <code>library</code>, el artefacto se nombra
-  <code>com.example.app.Util.mod</code>. Sin
-  <code>library</code>, se llama <code>Util.mod</code>.
+  El nombre entero de un módulo es su <code>library</code> y el suyo: el de arriba es
+  <code>com.example.app.Util</code>, y su artefacto, <code>com.example.app.Util.mod</code>. Sin
+  <code>library</code> es como si esa parte no existiera: <code>Util</code>, y <code>Util.mod</code>.
+</p>
+<p>
+  Es el <code>package</code> de Java, y su convención es la misma: el dominio de quien lo hace, del revés, el
+  nombre del proyecto y el del módulo. Lo correcto es que todo módulo tenga la suya: dos que se llaman igual no
+  chocan si su <code>library</code> es otra. Uno sin ella que se llame como uno de la biblioteca estándar
+  (<code>Log</code>, <code>App</code>, <code>Json</code>…) tiene su mismo nombre entero, y según dónde corra el
+  programa se usa uno u otro: ponle una.
 </p>
 
 <h3 id="main">10.2 <code>main(arg: string)</code> y constructor de módulo</h3>
@@ -2217,14 +2224,20 @@ e.etiqueta := <span class="str">"cuadrado de 2"</span>              <span class=
 
 <h3 id="imports">10.3 <code>import</code> / <code>from</code></h3>
 <pre><code><span class="kw">module</span> App
-  <span class="kw">import</span> Util                       <span class="comment">// misma library</span>
-  <span class="kw">import</span> com.example.Util           <span class="comment">// path cualificado</span>
+  <span class="kw">import</span> Util                       <span class="comment">// sin library</span>
+  <span class="kw">import</span> com.example.Motor          <span class="comment">// con la suya</span>
   <span class="kw">import</span> ext.tools.Helper <span class="kw">from</span> <span class="str">"plugins/helper.mod"</span>
   ...
 <span class="kw">end</span> App</code></pre>
 <ul>
-  <li>El último segmento del path es el alias local (<code>Util</code>,
-      <code>Helper</code>). Lo usas como <code>Util.foo()</code>.</li>
+  <li>El último segmento del path es el alias local (<code>Util</code>, <code>Motor</code>,
+      <code>Helper</code>). Lo usas como <code>Util.foo()</code>. En un módulo no pueden acabar igual dos
+      <code>import</code>: es un error.</li>
+  <li><strong>Un módulo se importa por su nombre entero</strong>: con su <code>library</code> delante si la tiene,
+      también desde otro módulo de la misma. <code>import Util</code> es el que no tiene ninguna. Si hay dos que se
+      llaman igual, lo resuelve quien lo escribe: con la <code>library</code> (poniéndosela al suyo, si no la
+      tiene) o, si viene de un pack, diciendo de cuál (<code>import Util from pack MisLibs</code>,
+      <a href="guia-ide.html#packs-usar">guía del IDE §10.2</a>).</li>
   <li><code>from "&lt;path&gt;"</code> dice al <strong>compilador</strong> dónde encontrar
       el <code>.mod</code> (o el <code>.bp</code>) del que sacar la interfaz. En ejecución
       la VM busca el módulo por su nombre, siempre en el mismo orden: el pack en

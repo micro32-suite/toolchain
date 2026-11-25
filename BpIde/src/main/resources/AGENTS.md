@@ -142,6 +142,7 @@ code. Files on the PC: only inside the folder the user allowed.
 | public fields | `public property x: integer` |
 | `{ }` and `;` | Every block closes with its name or keyword: `end main`, `end Counter`, `endif`, `endwh`, `next i`, `endtry`. No semicolons. |
 | `=` to assign | `:=` assigns; `==` compares |
+| `package com.example;` | `library "com.example"`, before `module` (in JC, with `;`). The module is then `com.example.Util`, and is imported by that full name, always (`import com.example.Util`, used as `Util.f()`). A module of yours called like one of the standard library (`Log`, `App`, `Json`…: `bp api` lists them) needs one |
 | a long line | It goes on if it ends in an operator or a comma: `"a" +` at the end of the line, not at the start of the next |
 
 What does work as you would expect: `class B extends A`, `super(x)` in the constructor and `super.method()`;

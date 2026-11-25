@@ -266,7 +266,8 @@ class MensajesQueEnsenanTest {
 
     @Test @DisplayName("JC: la cabecera de un fichero de Java, los import y los genéricos propios")
     void jcCabecera() {
-        jcLee("package es.prueba;\nmodule M\n{\n}\n", "un .jc es un módulo, module Nombre { … }");
+        jcLee("package es.prueba;\nmodule M\n{\n}\n", "en JC es library, con su nombre entre comillas: library \"es.prueba\";");
+        lineas("package es.prueba;\npublic class K\n{\n}\n", 1, 2);
         jcLee("public class K\n{\n}\n", "un .jc es un módulo, module Nombre { … }");
         jcLee("module M\n{\n   import java.util.*;\n}\n", "import nombra un módulo, sin '*'");
         jcLee("module M\n{\n   using System;\n}\n", "se importa con import");

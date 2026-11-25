@@ -209,6 +209,11 @@ final class JcParser {
             if (actual().tipo != Tipo.CADENA) throw error("se esperaba una cadena tras 'library'");
             library = (String) avanza().valor;
             espera(";");
+        } else if (esNombre("package") || esNombre("namespace")) {   // V9 #860: el de Java y el de C#
+            Tok t = avanza();
+            library = nombrePunteado("el nombre tras '" + t.texto + "'");
+            apunta(errorEn(t, "en JC es library, con su nombre entre comillas: library \"" + library + "\";"));
+            espera(";");
         }
         espera("module", "'module' al principio del fichero (un .jc es un módulo, module Nombre { … }, con los import y las"
                 + " clases dentro)");
