@@ -2907,7 +2907,8 @@ public class FrmMain extends javax.swing.JFrame
                 .explica("Compila y ejecuta en el PC, en la VM Java (la de referencia), el fuente de la pestaña activa"
                         + " (o el proyecto abierto). Acaba cuando acaba el programa: devuelve su código de salida"
                         + " («codigo»: 0 si fue bien), su estado, lo que tardó, la traza si falló, los errores de la"
-                        + " compilación y la salida («salida»: lo que imprime el programa va ahí). Un programa a la vez.")
+                        + " compilación, lo que imprime el programa, y nada más («imprime»), y lo que se ve en la consola"
+                        + " («salida»: también lo de compilar y ejecutar). Un programa a la vez.")
                 .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("responder", "Responder al programa", this::responde)
@@ -2956,15 +2957,16 @@ public class FrmMain extends javax.swing.JFrame
                 .explica("Compila el fuente de la pestaña activa (o el proyecto) y lo ejecuta en el dispositivo"
                         + " conectado (una placa o el micro simulado; antes, «placa_conectar» o «micro_simulado»): sube"
                         + " lo que haga falta, ejecuta, y acaba cuando acaba el programa en el dispositivo, con su"
-                        + " código de salida, su estado, los errores de la compilación y la salida.")
+                        + " código de salida, su estado, los errores de la compilación, lo que imprime el programa, y"
+                        + " nada más («imprime»), y lo que se ve en la consola («salida»).")
                 .parametro("como", "ruta", como)
                 .pide(this::pideParaLaPlaca);
         comandos.registra("ejecutar_ventana", "Run Window (VM-C)", this::ejecutarEnVentana)
                 .corto("Run Window")
                 .ayuda("Ver la ventana en el PC (VM-C nativa)")
                 .explica("Compila y ejecuta en el PC con la VM-C y su ventana gráfica (la pantalla de una placa, en una"
-                        + " ventana del PC). Acaba cuando se cierra esa ventana: devuelve el código de salida y la"
-                        + " salida.")
+                        + " ventana del PC). Acaba cuando se cierra esa ventana: devuelve el código de salida, lo que"
+                        + " imprime el programa, y nada más («imprime»), y lo que se ve en la consola («salida»).")
                 .parametro("como", "ruta", como)
                 .pide(this::pideParaCompilar);
         comandos.registra("dao", "DAO build", p -> listo(daoBuild()))
@@ -3493,16 +3495,19 @@ public class FrmMain extends javax.swing.JFrame
                     args.add(mod.getFileName().toString());
                     ProcessBuilder pb = new ProcessBuilder(args);
                     pb.directory(outDir.toFile());
-                    pb.redirectErrorStream(true);
                     vmcProcess = pb.start();
                     final Process proceso = vmcProcess;
-                    try (java.io.BufferedReader r = new java.io.BufferedReader(
-                            new java.io.InputStreamReader(proceso.getInputStream(),
-                                    java.nio.charset.StandardCharsets.UTF_8))) {
-                        String line;
-                        while ((line = r.readLine()) != null) publish(line + "\n");
-                    }
+                    // V9 #912: las dos salidas, aparte: por la estándar, lo que imprime el programa; por la de errores, lo de
+                    // la VM (#855). A la consola, las dos.
+                    Thread errores = new Thread(() -> leeLineas(proceso.getErrorStream(), l -> publish(l + "\n")), "vmc-errores");
+                    errores.setDaemon(true);
+                    errores.start();
+                    leeLineas(proceso.getInputStream(), l -> {
+                        impreso.append(l).append('\n');
+                        publish(l + "\n");
+                    });
                     int salio = proceso.waitFor();
+                    errores.join(2000);
                     codigo.set(salio);   // V9 H2.2
                     publish("== ventana cerrada (exit " + salio + ") ==\n");
                 } catch (Exception ex) {
@@ -3531,12 +3536,22 @@ public class FrmMain extends javax.swing.JFrame
                                                                                    : "la ventana no llegó a abrirse"));
                 } else {
                     r = (c == 0 ? Resultado.bien("ejecutar_ventana: la ventana se cerró y el programa acabó bien")
-                                : Resultado.mal("ejecutar_ventana: la VM-C acabó con error")).con("codigo", c);
+                                : Resultado.mal("ejecutar_ventana: la VM-C acabó con error")).con("codigo", c)
+                            .con("imprime", impreso.toString());   // V9 #912
                 }
                 fin.complete(r.con("errores", erroresEnDatos()).con("salida", salida.toString()));
             }
         }.execute();
         return fin;
+    }
+
+    /** Las líneas de un flujo, en UTF-8, una a una, hasta que se acaba. */
+    private static void leeLineas(java.io.InputStream in, java.util.function.Consumer<String> linea) {
+        try (java.io.BufferedReader r = new java.io.BufferedReader(
+                new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8))) {
+            String l;
+            while ((l = r.readLine()) != null) linea.accept(l);
+        } catch (java.io.IOException seFue) { /* el proceso, acabado */ }
     }
 
     /** Sube directorios desde {@code start} hasta encontrar uno que contenga
@@ -3706,8 +3721,13 @@ public class FrmMain extends javax.swing.JFrame
             consolaArea.setText("");
             inicioDeLaSalida = 0;
         }
+        impreso.setLength(0);
         errors.clear();
     }
+
+    /** V9 #912 — lo que imprime el programa que se ejecuta en el PC, y nada más (la consola lleva también lo de compilar y lo
+     *  de ejecutar): el campo «imprime» de los resultados. En la placa, el suyo ({@link PicoExplorer#ultimoImpreso}). */
+    private final StringBuffer impreso = new StringBuffer();
 
     private String laSalida() {
         String s = consolaArea.getText();
@@ -3734,6 +3754,7 @@ public class FrmMain extends javax.swing.JFrame
                 if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
                 if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
             }
+            r.con("imprime", impreso.toString());   // V9 #912
         }
         return r.con("errores", errs).con("salida", salida);
     }
@@ -3915,10 +3936,12 @@ public class FrmMain extends javax.swing.JFrame
         if (estado != null && estado.startsWith("error:")) {
             r = Resultado.mal("ejecutar_placa: " + estado);
         } else if (ex == null) {
-            r = Resultado.mal("ejecutar_placa: el programa acabó sin decir cómo (" + estado + ")");
+            r = Resultado.mal("ejecutar_placa: el programa acabó sin decir cómo (" + estado + ")")
+                    .con("imprime", picoExplorer.ultimoImpreso());
         } else {
             r = ex.exitCode == 0 ? Resultado.bien("ejecutar_placa: el programa acabó bien")
                                  : Resultado.mal("ejecutar_placa: el programa acabó con error");
+            r.con("imprime", picoExplorer.ultimoImpreso());   // V9 #912
             r.con("codigo", ex.exitCode).con("estado", ex.reason);
             if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
             if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
@@ -4287,9 +4310,9 @@ public class FrmMain extends javax.swing.JFrame
                     });
                 } else if (datosPedidos != null) {
                     final DatosPedidos dp = datosPedidos;   // V9 #870: la salida, en orden con lo que pide
-                    client.setOutputSink(s -> { dp.escribe(s); publish.accept(s); });
+                    client.setOutputSink(s -> { impreso.append(s); dp.escribe(s); publish.accept(s); });
                 } else {
-                    client.setOutputSink(publish::accept);
+                    client.setOutputSink(s -> { impreso.append(s); publish.accept(s); });
                 }
                 // N20 — IO.prompt(spec) del programa BP abre un JDialog
                 // construido a partir del spec JSON. Las respuestas

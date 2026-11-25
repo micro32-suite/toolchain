@@ -232,7 +232,7 @@ public final class ServidorIa {
                 + " IDE ve lo que haces en su consola («[ia] …»). Para trabajar: escribe el fuente (.bp o .jc) en el"
                 + " disco y ábrelo con «abrir» (lo de la pestaña activa, o el proyecto abierto, es lo que compilan y"
                 + " ejecutan los demás); «compilar» da los errores con su línea; «ejecutar» lo ejecuta en el PC y"
-                + " devuelve lo que imprime («salida») y su código de salida («codigo»). Para una placa o el micro"
+                + " devuelve lo que imprime («imprime») y su código de salida («codigo»). Para una placa o el micro"
                 + " simulado (una placa que corre en el PC): «placa_conectar» o «micro_simulado», y después"
                 + " «ejecutar_placa». Los ajustes de la placa (sus variables de entorno: la memoria de los packs, el panel,"
                 + " la SD…): «entorno_listar», «entorno_poner» y «entorno_borrar»; se leen al arrancar («placa_reiniciar»,"

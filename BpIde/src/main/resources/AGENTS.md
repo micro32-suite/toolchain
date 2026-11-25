@@ -193,7 +193,9 @@ the same, with the same names and the same traps as above.
   ```
 - The default font has no accented letters or `ñ` (they show as a box); `°` works.
 - The screen size depends on where it runs: 480x320 on the PC (unless `--screen=WxH`), the one in its settings on the
-  simulated micro, the panel's on a board. Lay out with `align` relative to the screen, not with fixed coordinates.
+  simulated micro, the panel's on a board. Lay out with `align` relative to the screen, not with fixed coordinates. A
+  `Gui.Panel` (a form's window is one) has a border and a padding: less fits inside than its size, and its children are placed
+  from there (`@INSTALACION@docs/en/gui.html.md`, 19.4).
 - To test it with nobody in front of it (a test in `tests/`, run by `bp test`: see Tests, above):
   - `print Gui.dumpTree()` dumps the widget tree as text: compare that (its `.out`), and check with `Assert`.
   - `Gui.click(widget)` simulates a click; `Gui.change(widget)`, a change of value (its `onChange`; the value, the one

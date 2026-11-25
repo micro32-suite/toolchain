@@ -14,7 +14,8 @@
 //   6. (V9 #899) un programa en un .pack, subido como lo sube el Run on Device (Despliegue)
 //      dos veces seguidas: las dos se queda en la placa (la segunda lo borraba);
 //   7. (V9 #907) una librería que la placa tiene en otra compilación, en /lib: si el programa no
-//      enlaza con ella («presente pero no exporta»), se dice de dónde la carga y qué hacer.
+//      enlaza con ella («presente pero no exporta»), se dice de dónde la carga y qué hacer;
+//   8. (V9 #912) lo que imprime un programa que falla: sólo lo suyo, sin la traza, que va a la salida que se ve.
 //
 // Uso:
 //   java -cp BpIde/target/BpIde-6.0.jar com.mycompany.bpide.SubidaSmoke <COMx | host:puerto> [KB]
@@ -82,6 +83,42 @@ public final class SubidaSmoke {
         }
     }
 
+    /** V9 #912 — lo que imprime el programa («imprime» en los resultados): sin la traza, que sí va a lo que se ve. */
+    private static void loImpreso(String destino, String stdlib) throws Exception {
+        File core = new File(stdlib, "Core.mod");
+        if (!core.isFile()) { System.out.println("  (sin " + core + ": lo impreso, sin probar)"); return; }
+        java.nio.file.Path dir = Files.createTempDirectory("imprime"), bp = dir.resolve("Imprime.bp"), out = dir.resolve("out");
+        Files.write(bp, ("module Imprime\n  function main(arg: string)\n    print \"antes\"\n"
+                + "    var a: integer[] := integer[3]\n    var i: integer := len(a)\n    print a[i]\n  end main\nend Imprime\n")
+                .getBytes("UTF-8"));
+        java.io.PrintStream o = System.out;
+        boolean compila;
+        System.setOut(new java.io.PrintStream(new java.io.ByteArrayOutputStream()));
+        try {
+            compila = basicplus.frontend.Main.compileFile(bp, out, "mivm", true);
+        } finally {
+            System.setOut(o);
+        }
+        mira(compila, "el programa de lo impreso compila");
+        TrazaError.conoce(out);
+        boolean serie = destino.toUpperCase().startsWith("COM") || destino.startsWith("/dev/");
+        Backend b = serie ? new SerialBackend() : new RedBackend();
+        b.connect(destino);
+        try {
+            String remoto = new Despliegue().sube(b, ((AbstractBpvmBackend) b).debugClient(), null,
+                    out.resolve("Imprime.mod").toFile(), Arrays.asList(core), java.util.Collections.singleton("Core.mod"),
+                    null, "/app", s -> { });
+            java.util.List<String> seVe = new java.util.ArrayList<>();
+            b.run(remoto, null, seVe::add);
+            String imprime = ((AbstractBpvmBackend) b).ultimoImpreso();
+            mira("antes\n".equals(imprime), "lo que imprime un programa que falla, sólo lo suyo: «" + imprime.trim() + "»");
+            mira(seVe.size() > 1 && String.join("|", seVe).contains("Imprime.bp:6"), "... y lo que se ve, con dónde falló: " + seVe);
+        } finally {
+            b.del("/app/Imprime.mod");
+            b.close();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         if (args.length < 1) {
             System.err.println("uso: SubidaSmoke <COMx | host:puerto> [KB]");
@@ -138,6 +175,7 @@ public final class SubidaSmoke {
         }
         elPackSeQueda(destino);
         laPista(destino, args.length > 2 ? args[2] : "bpstdlib");
+        loImpreso(destino, args.length > 2 ? args[2] : "bpstdlib");
         System.out.println(fallos == 0 ? "[status=OK]" : "[status=FAIL]");
         System.exit(fallos == 0 ? 0 : 1);
     }

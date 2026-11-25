@@ -176,7 +176,7 @@ public final class GuiBackend {
     /** ¿es `parent` un contenedor vivo? (paridad con bpvm_gui_parent_alive de la VM-C). */
     public boolean parentAlive(int parent) { return parent > 0 && nodes.get(parent) != null; }
 
-    public int createObj(int parent)    { return create("panel",  new JPanel(null), parent); }
+    public int createObj(int parent)    { return create("panel",  new PanelComoLvgl(), parent); }
     public int createLabel(int parent)  { return create("label",  new JLabel(),     parent); }
     public int createButton(int parent) { return create("button", new JButton(),    parent); }
     public int createCheckbox(int parent) {
@@ -452,6 +452,8 @@ public final class GuiBackend {
      *  y el interruptor) que tiene el foco —en Swing, de serie, es la barra espaciadora— y Tab sale de un campo de texto
      *  al control siguiente, en vez de escribir un tabulador. */
     private static void comoLvgl(JComponent comp) {
+        // V9 #909: sin fondo propio, como en LVGL (el suyo, gris, se veía sobre un panel, que es blanco)
+        if (comp instanceof JCheckBox || comp instanceof JSlider) comp.setOpaque(false);
         if (comp instanceof AbstractButton) {
             javax.swing.InputMap im = comp.getInputMap(JComponent.WHEN_FOCUSED);
             im.put(javax.swing.KeyStroke.getKeyStroke(java.awt.event.KeyEvent.VK_ENTER, 0, false), "pressed");
@@ -459,6 +461,59 @@ public final class GuiBackend {
         } else if (comp instanceof JTextArea) {
             comp.setFocusTraversalKeys(java.awt.KeyboardFocusManager.FORWARD_TRAVERSAL_KEYS, null);
             comp.setFocusTraversalKeys(java.awt.KeyboardFocusManager.BACKWARD_TRAVERSAL_KEYS, null);
+        }
+    }
+
+    // ---- V9 #909 — lo que un contenedor deja por dentro, como en LVGL ----
+    //
+    // Un panel de LVGL (el estilo `card` de su tema) tiene un borde y un margen por dentro, y las x, y de sus hijos se cuentan
+    // desde ahí: lo que cabe es menos de lo que mide. Aquí salían en su esquina, y el mismo programa no quedaba igual en el PC
+    // que en la placa. Los números son los del tema (lv_theme_default.c, a los 130 ppp de lv_conf.h), medidos en los píxeles
+    // de la VM-C y de la P4: el margen depende del ancho de la pantalla, la de fábrica —al girarla no cambia—.
+
+    private static final int BORDE = 2;
+    private static final Color COLOR_BORDE = new Color(0xE0E0E0);
+
+    private int anchoDeFabrica() { return rotation == 90 || rotation == 270 ? screenH : screenW; }
+    private int margen()         { int a = anchoDeFabrica(); return a <= 320 ? 13 : a < 720 ? 16 : 20; }
+    private int radio()          { return anchoDeFabrica() < 720 ? 7 : 10; }
+
+    /** De la esquina de {@code p} a la de lo que cabe dentro: en un panel, el borde y el margen; en la página de una pestaña,
+     *  el margen; en lo demás, nada. */
+    private int porDentro(Node p) {
+        if (p == null) return 0;
+        switch (p.type) {
+            case "panel":   return BORDE + margen();
+            case "tabpage": return margen();
+            default:        return 0;
+        }
+    }
+
+    /** Un panel como el de LVGL: blanco, con las esquinas redondeadas y su borde gris, que se pinta encima de los hijos. */
+    private final class PanelComoLvgl extends JPanel {
+        PanelComoLvgl() {
+            super(null);
+            setBackground(Color.WHITE);
+        }
+        @Override public boolean isOpaque() { return false; }                  // las esquinas son del de debajo
+        @Override public boolean isOptimizedDrawingEnabled() { return false; } // el borde, encima: un hijo no se repinta solo
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D d = (Graphics2D) g.create();
+            d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            d.setColor(getBackground());
+            d.fillRoundRect(0, 0, getWidth(), getHeight(), 2 * radio(), 2 * radio());
+            d.dispose();
+        }
+        @Override protected void paintChildren(Graphics g) {
+            super.paintChildren(g);
+            Graphics2D d = (Graphics2D) g.create();
+            d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            d.setRenderingHint(RenderingHints.KEY_STROKE_CONTROL, RenderingHints.VALUE_STROKE_PURE);   // en sus dos píxeles
+            d.setColor(COLOR_BORDE);
+            d.setStroke(new BasicStroke(BORDE));
+            d.drawRoundRect(BORDE / 2, BORDE / 2, getWidth() - BORDE, getHeight() - BORDE,
+                    2 * radio() - BORDE, 2 * radio() - BORDE);
+            d.dispose();
         }
     }
 
@@ -542,8 +597,9 @@ public final class GuiBackend {
     public int  getHeight(int handle) { Node n = nodes.get(handle); return (n == null) ? 0 : (n.h >= 0 ? n.h : n.comp.getPreferredSize().height); }
     public void setX(int handle, int x) { Node n = nodes.get(handle); if (n != null) { n.x = x; n.posSet = true; relayout(n); } }
     public void setY(int handle, int y) { Node n = nodes.get(handle); if (n != null) { n.y = y; n.posSet = true; relayout(n); } }
-    public int  getX(int handle) { Node n = nodes.get(handle); return (n == null) ? 0 : (n.posSet ? n.x : n.comp.getX()); }
-    public int  getY(int handle) { Node n = nodes.get(handle); return (n == null) ? 0 : (n.posSet ? n.y : n.comp.getY()); }
+    // La que no se puso a mano, como lv_obj_get_x: desde donde empieza lo de dentro del padre (#909).
+    public int  getX(int handle) { Node n = nodes.get(handle); return (n == null) ? 0 : (n.posSet ? n.x : n.comp.getX() - porDentro(nodes.get(n.parent))); }
+    public int  getY(int handle) { Node n = nodes.get(handle); return (n == null) ? 0 : (n.posSet ? n.y : n.comp.getY() - porDentro(nodes.get(n.parent))); }
     public void align(int handle, int a, int dx, int dy) {
         Node n = nodes.get(handle); if (n == null) return;
         n.align = a; n.dx = dx; n.dy = dy; n.posSet = false; relayout(n);
@@ -685,12 +741,13 @@ public final class GuiBackend {
         if (p.comp instanceof AbstractButton) enBoton(n);
         int w  = (n.w >= 0) ? n.w : n.comp.getPreferredSize().width;
         int h  = (n.h >= 0) ? n.h : n.comp.getPreferredSize().height;
+        int d  = porDentro(p);                     // #909: lo que deja el padre por dentro
         if (n.posSet) {                            // posición explícita (x,y)
-            n.comp.setBounds(n.x, n.y, w, h);
+            n.comp.setBounds(d + n.x, d + n.y, w, h);
             return;
         }
-        int pw = (p.w >= 0) ? p.w : Math.max(p.comp.getWidth(),  screenW);
-        int ph = (p.h >= 0) ? p.h : Math.max(p.comp.getHeight(), screenH);
+        int pw = ((p.w >= 0) ? p.w : Math.max(p.comp.getWidth(),  screenW)) - 2 * d;
+        int ph = ((p.h >= 0) ? p.h : Math.max(p.comp.getHeight(), screenH)) - 2 * d;
         int x = 0, y = 0;
         switch (n.align) {
             case TOP_LEFT:     x = 0;          y = 0;          break;
@@ -704,7 +761,7 @@ public final class GuiBackend {
             case BOTTOM_RIGHT: x = pw-w;       y = ph-h;       break;
             default: break;
         }
-        n.comp.setBounds(x + n.dx, y + n.dy, w, h);
+        n.comp.setBounds(d + x + n.dx, d + y + n.dy, w, h);
     }
 
     /** V9 #880 — lo de dentro de un botón (su texto) lo coloca Swing por su cuenta (OverlayLayout), por la alineación de

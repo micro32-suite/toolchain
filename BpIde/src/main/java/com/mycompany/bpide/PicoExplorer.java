@@ -393,7 +393,8 @@ public final class PicoExplorer extends JPanel {
                 .pide(this::pideSubida);
         comandos.registra("placa_ejecutar", "Run", this::ejecutaFichero)
                 .explica("Ejecuta un programa (.mod o .pack) que YA está en el dispositivo; acaba cuando acaba, con su"
-                        + " código de salida, su estado y la salida. (Para compilar y ejecutar el fuente del IDE,"
+                        + " código de salida, su estado, lo que imprime el programa, y nada más («imprime»), y lo que se ve en"
+                        + " la consola («salida»: también dónde falló). (Para compilar y ejecutar el fuente del IDE,"
                         + " «ejecutar_placa».)")
                 .parametro("fichero", "la ruta del .mod (o .pack) en la placa (/app/Main.mod)")
                 .necesita("fichero")
@@ -1444,6 +1445,12 @@ public final class PicoExplorer extends JPanel {
         return (b instanceof AbstractBpvmBackend) ? ((AbstractBpvmBackend) b).ultimoExited() : null;
     }
 
+    /** V9 #912 — lo que imprimió el último programa ejecutado en la placa; "" si no hay ninguno. */
+    public String ultimoImpreso() {
+        Backend b = this.backend;
+        return (b instanceof AbstractBpvmBackend) ? ((AbstractBpvmBackend) b).ultimoImpreso() : "";
+    }
+
     /* ── EL ÁRBOL POR COLORES (encargo de Eduardo, 18-ago) ──────────────────
      *
      * Cada tipo con su color, y **el ROJO RESERVADO**: es lo importante del
@@ -2294,7 +2301,7 @@ public final class PicoExplorer extends JPanel {
                 if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
                 if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
             }
-            fin.complete(r.con("fin", statusStr).con("salida", salida.toString()));
+            fin.complete(r.con("fin", statusStr).con("imprime", ultimoImpreso()).con("salida", salida.toString()));
         }, motivo -> fin.complete(Resultado.mal("placa_ejecutar: " + motivo).con("salida", salida.toString())));
         return fin;
     }

@@ -185,6 +185,10 @@ public abstract class AbstractBpvmBackend implements Backend {
 
     public edu.bpgenvm.vm.debug.ExitedEvent ultimoExited() { return ultimoExited; }
 
+    /** V9 #912 — lo que imprimió el último programa, tal cual llegó por el cable: ni la traza ni nada del IDE. */
+    private final StringBuffer impreso = new StringBuffer();
+    public String ultimoImpreso() { return impreso.toString(); }
+
     /** V9 #857 — ¿las líneas de la traza («  en X.bp:8 (Main)»…), tras la salida del programa, por el mismo sink? En el
      *  IDE, sí (la consola). `bp` las escribe en la salida de errores: en la estándar, sólo lo del programa (#855). */
     private volatile boolean trazaEnLaSalida = true;
@@ -198,8 +202,10 @@ public abstract class AbstractBpvmBackend implements Backend {
         final StringBuilder lineBuf = new StringBuilder();
         final CompletableFuture<String> done = new CompletableFuture<>();
 
+        impreso.setLength(0);
         c.setOutputSink(chunk -> {
             if (chunk == null || chunk.isEmpty()) return;
+            impreso.append(chunk);
             int last = 0;
             for (int i = 0; i < chunk.length(); i++) {
                 if (chunk.charAt(i) == '\n') {
