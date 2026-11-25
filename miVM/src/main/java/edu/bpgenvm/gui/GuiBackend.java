@@ -130,11 +130,14 @@ public final class GuiBackend {
 
     // ---- Creación ----
 
+    /** V9 #880 — el fondo de la pantalla: el del tema claro de LVGL, el de las placas (lv_theme_default). */
+    private static final Color FONDO = new Color(0xF5F5F5);
+
     /** Pantalla raíz (lazy). Devuelve su handle. */
     public int screenActive() {
         if (screenHandle != 0) return screenHandle;
         JPanel root = new JPanel(null);
-        root.setBackground(Color.BLACK);
+        root.setBackground(FONDO);
         int h = nextHandle++;
         Node n = new Node(h, "screen", root, 0);
         n.w = screenW; n.h = screenH;
@@ -675,6 +678,7 @@ public final class GuiBackend {
     private void relayout(Node n) {
         if (n.parent == 0) return;                 // la screen ocupa todo
         Node p = nodes.get(n.parent); if (p == null) return;
+        if (p.comp instanceof AbstractButton) enBoton(n);
         int w  = (n.w >= 0) ? n.w : n.comp.getPreferredSize().width;
         int h  = (n.h >= 0) ? n.h : n.comp.getPreferredSize().height;
         if (n.posSet) {                            // posición explícita (x,y)
@@ -697,6 +701,24 @@ public final class GuiBackend {
             default: break;
         }
         n.comp.setBounds(x + n.dx, y + n.dy, w, h);
+    }
+
+    /** V9 #880 — lo de dentro de un botón (su texto) lo coloca Swing por su cuenta (OverlayLayout), por la alineación de
+     *  cada uno, y la de un JLabel es a la izquierda: la de su align. */
+    private void enBoton(Node n) {
+        float x = 0, y = 0;
+        switch (n.align) {
+            case TOP_MID: case CENTER: case BOTTOM_MID:        x = 0.5f; break;
+            case TOP_RIGHT: case RIGHT_MID: case BOTTOM_RIGHT: x = 1;    break;
+            default: break;
+        }
+        switch (n.align) {
+            case LEFT_MID: case CENTER: case RIGHT_MID:             y = 0.5f; break;
+            case BOTTOM_LEFT: case BOTTOM_MID: case BOTTOM_RIGHT:   y = 1;    break;
+            default: break;
+        }
+        n.comp.setAlignmentX(x);
+        n.comp.setAlignmentY(y);
     }
 
     // ---- Eventos (upcall): bind del objeto BP + cola EDT→worker ----
