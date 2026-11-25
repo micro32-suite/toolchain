@@ -1705,6 +1705,11 @@ public final class Parser {
 
     private IExpr parseCmp() {
         IExpr left = parseAdd();
+        if (check(TokenType.EQUALS)) {   // V9 #860 — `if x = 3 then`: se dice, y se sigue como si fuera `==`
+            error("'=' no compara en BP: usa '=='");
+            Token op = current(); advance();
+            return new BinaryExpr("==", left, parseAdd(), op.line, op.column);
+        }
         if (check(TokenType.EQ) || check(TokenType.NEQ)
                 || check(TokenType.LT) || check(TokenType.GT)
                 || check(TokenType.LE) || check(TokenType.GE)) {

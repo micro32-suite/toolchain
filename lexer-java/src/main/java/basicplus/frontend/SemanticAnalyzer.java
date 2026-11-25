@@ -160,10 +160,9 @@ public final class SemanticAnalyzer {
         boolean medida = "length".equalsIgnoreCase(m) || "size".equalsIgnoreCase(m) || "count".equalsIgnoreCase(m);
         if (tipo instanceof ArrayType) return medida ? ": se escribe len(v)" : "";
         if (tipo == PrimitiveType.STRING) {
-            String igual = enJc ? "==" : "=";
             if (medida) return ": se escribe len(s)";
-            if ("isEmpty".equals(m)) return ": se escribe len(s) " + igual + " 0";
-            if ("equals".equalsIgnoreCase(m)) return ": se comparan con " + igual + ", que mira el texto";
+            if ("isEmpty".equals(m)) return ": se escribe len(s) == 0";
+            if ("equals".equalsIgnoreCase(m)) return ": se comparan con ==, que mira el texto";
             if ("concat".equalsIgnoreCase(m)) return ": se unen con +";
             String f = m.toLowerCase(java.util.Locale.ROOT);
             if (f.startsWith("toupper") || "ucase".equals(f)) f = "upper";

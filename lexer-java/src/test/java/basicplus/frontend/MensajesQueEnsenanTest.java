@@ -99,7 +99,7 @@ class MensajesQueEnsenanTest {
     void cadenas(@TempDir Path tmp) throws IOException {
         bp(tmp, "    var s: string := \"a\"\n    print s.length()\n    print s.toUpperCase()\n    print s.trim()\n"
                 + "    print s.equals(\"b\")\n    print s.loquesea()\n",
-                "se escribe len(s)", "es una función, upper(s)", "es una función, trim(s)", "se comparan con =,",
+                "se escribe len(s)", "es una función, upper(s)", "es una función, trim(s)", "se comparan con ==,",
                 "las cadenas se tratan con funciones, len(s)");
         bp(tmp, "    var n: integer := 3\n    print n.toString()\n    var v: integer[] := [1, 2]\n    print v.length\n",
                 "es una función, intToString(x)", "se escribe len(v)");
@@ -128,6 +128,8 @@ class MensajesQueEnsenanTest {
         bp(tmp, "    let y = 3\n", "en BP se asigna sin 'let': y := ");
         bp(tmp, "    var x: integer = 3\n", "'=' no asigna en BP: usa ':='");
         bp(tmp, "    for i = 0 to 3 do\n      print i\n    next i\n", "'=' no asigna en BP: usa ':='");
+        bp(tmp, "    var x: integer := 3\n    if x = 3 then print x\n", "'=' no compara en BP: usa '=='");
+        bp(tmp, "    var x: integer := 3\n    while x = 3 and not x = 4 do\n      x += 1\n    endwh\n", "'=' no compara en BP: usa '=='");
         bp(tmp, "    var x: integer := 1\n    x++\n", "en BP se suma y se resta con += y -=: x += 1");
         bp(tmp, "    print \"a\" & \"b\"\n", "las cadenas se unen con +");
         String m = compila(tmp, ".bp", "module T\n  const K: integer = 3\n  function Main()\n    print K\n  end Main\nend T\n");
@@ -141,8 +143,8 @@ class MensajesQueEnsenanTest {
     @Test @DisplayName("BP: un = en una declaración no arrastra más errores")
     void igualSinCascada(@TempDir Path tmp) throws IOException {
         String m = compila(tmp, ".bp", "module T\n  function Main()\n    var x: integer = 3\n    for i = 0 to x do\n      print i\n"
-                + "    next i\n  end Main\nend T\n");
-        assertEquals(2, m.split("error sintáctico", -1).length - 1, m);
+                + "    next i\n    if x = 3 then\n      print x\n    endif\n  end Main\nend T\n");
+        assertEquals(3, m.split("error sintáctico", -1).length - 1, m);
         assertFalse(m.contains("error semántico"), m);
     }
 
