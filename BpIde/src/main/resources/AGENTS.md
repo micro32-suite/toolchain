@@ -179,7 +179,6 @@ the same, with the same names and the same traps as above.
 - The default font has no accented letters or `ñ` (they show as a box); `°` works.
 - The screen size depends on where it runs: 480x320 on the PC (unless `--screen=WxH`), the one in its settings on the
   simulated micro, the panel's on a board. Lay out with `align` relative to the screen, not with fixed coordinates.
-- A button whose size you set by hand does not center its text: `btn.childAt(0).align(Gui.Align.CENTER, 0, 0)`.
 - To test it with nobody in front of it (a test in `tests/`, run by `bp test`: see Tests, above):
   - `print Gui.dumpTree()` dumps the widget tree as text: compare that (its `.out`), and check with `Assert`.
   - `Gui.click(widget)` simulates a click; `Gui.change(widget)`, a change of value (its `onChange`; the value, the one
@@ -200,8 +199,10 @@ the same, with the same names and the same traps as above.
 Each peripheral is a class (`Gpio.Pin`, `I2c.HardI2C`, `Spi.Bus`, `Uart.Port`…). An I2C bus is an `I2c.I2C` (what a
 device library asks for): the micro's (`I2c.HardI2C`) or, when there are none left or its pins do not match, a software
 one on any two pins (`modSoftI2C.SoftI2C(sda, scl)`); only the constructor changes. On the PC, the hardware calls are written
-to the console. **Do not invent pin numbers**: ask which board it is, or look at
-`@INSTALACION@docs/INSTALAR_FIRMWARE.md` and the reference §14 (device libraries).
+to the console. **Do not invent pin numbers**: ask which board it is and look at `@INSTALACION@docs/en/PLACAS.md` —each
+board's pins (the program's, each bus's and the system's) and the links to its manufacturer's documentation, which has what
+is soldered on it (LED, button, display, connectors)—; or ask the board itself, running
+`@INSTALACION@samples/PinesPlaca.bp` on it, which prints those pins. The device libraries, in the reference §14.
 
 ## How to work
 
