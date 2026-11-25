@@ -5755,13 +5755,17 @@ public final class SemanticAnalyzer {
         }
     }
 
+    /** V9 #897 — false: es un módulo de un proyecto que no es su main. */
+    boolean esperaMain = true;
+
     private void validateModuleEntryPoints(ModuleNode mod) {
         // Las interfaces son contratos puros: sin main, sin entry-point. No
         // tiene sentido avisar de su ausencia.
         if (mod.isInterface) return;
         if (module.mainFunction == null) {
-            warn(mod.line, mod.column,
-                "el módulo '" + mod.name + "' no define 'main' ni 'Main' (no podrá ser módulo principal)");
+            if (esperaMain)
+                warn(mod.line, mod.column,
+                    "el módulo '" + mod.name + "' no define 'main' ni 'Main' (no podrá ser módulo principal)");
             return;
         }
         FunctionSymbol m = module.mainFunction;

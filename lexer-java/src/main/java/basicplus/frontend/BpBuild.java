@@ -212,6 +212,20 @@ public final class BpBuild {
      *  comentarios //. */
     private Map<String, Object> raw;
 
+    /** V9 #901 — el .mod de su main, con la {@code library} que diga su fuente; sin fuente (una librería), el de su nombre. */
+    public Path modDelMain() {
+        String nombre = main;
+        List<Path> donde = new ArrayList<>();
+        for (String ext : new String[] { ".bp", ".jc" }) donde.add(Paths.get(sourceDir, main + ext));
+        for (String s : sources) {
+            Path p = Paths.get(s);
+            if (p.getFileName().toString().replaceFirst("[.](bp|jc)$", "").equals(main)) donde.add(p);
+        }
+        for (Path p : donde)
+            if (Files.isRegularFile(p)) { nombre = Main.nombreDelModulo(p); break; }
+        return Paths.get(outDir).resolve(nombre + ".mod");
+    }
+
     /** V9 #897 — si {@code p} es el DAO de unas entidades que están a su lado (XDao.bp, con X.bp o X.jc), el nombre de su
      *  fichero; si no, null. Lo genera DAO build: que falte no es que el proyecto esté mal. */
     static String entidadesDelDao(Path p) {

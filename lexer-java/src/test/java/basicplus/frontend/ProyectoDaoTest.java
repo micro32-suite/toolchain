@@ -70,6 +70,31 @@ class ProyectoDaoTest {
         assertThrows(IOException.class, () -> BpBuild.load(proyecto(dir, "Jardin.bp", "Dao.bp")));
     }
 
+    @Test @DisplayName("De un módulo del proyecto que no es su main no se avisa de que no define main; del main, sí")
+    void avisoDeMain(@TempDir Path dir) throws IOException {
+        escribe(dir, "Lib.bp", "module Lib\n  public function f(): integer\n    return 1\n  end f\nend Lib\n");
+        escribe(dir, "App.bp", "module App\n  import Lib\n  function Main()\n    print Lib.f()\n  end Main\nend App\n");
+        escribe(dir, "A.bpbuild", "{ \"main\": \"App\", \"sourceDir\": \".\", \"sources\": [\"./Lib.bp\", \"./App.bp\"], \"outDir\": \"out\" }\n");
+        escribe(dir, "L.bpbuild", "{ \"main\": \"Lib\", \"sourceDir\": \".\", \"sources\": [\"./Lib.bp\"], \"outDir\": \"out\" }\n");
+        assertFalse(construye(BpBuild.load(dir.resolve("A.bpbuild"))).contains("no define 'main'"));
+        assertTrue(construye(BpBuild.load(dir.resolve("L.bpbuild"))).contains("el módulo 'Lib' no define 'main'"));
+    }
+
+    @Test @DisplayName("El .mod de un programa con library lleva su nombre entero, también el del main de un proyecto")
+    void conLibrary(@TempDir Path dir) throws IOException {
+        Path bp = escribe(dir, "Prog.bp", "// algo\nlibrary \"com.ejemplo\"\nmodule Prog\n  function Main()\n  end Main\nend Prog\n");
+        Path jc = escribe(dir, "Otro.jc", "library \"com.ejemplo\";\nmodule Otro\n{\n   function void Main() { }\n}\n");
+        assertEquals("com.ejemplo.Prog", Main.nombreDelModulo(bp));
+        assertEquals("com.ejemplo.Otro", Main.nombreDelModulo(jc));
+        for (String m : new String[] { "Prog", "Otro" }) {
+            escribe(dir, "P.bpbuild", "{ \"main\": \"" + m + "\", \"sourceDir\": \".\", \"outDir\": \"out\" }\n");
+            BpBuild p = BpBuild.load(dir.resolve("P.bpbuild"));
+            construye(p);
+            assertEquals("com.ejemplo." + m + ".mod", p.modDelMain().getFileName().toString());
+            assertTrue(Files.isRegularFile(p.modDelMain()), "está: " + p.modDelMain());
+        }
+    }
+
     @Test @DisplayName("Los DAO de unas entidades escritas en JC, como los de BP")
     void entidadesEnJc(@TempDir Path dir) throws IOException {
         Files.createDirectories(dir.resolve("bp"));

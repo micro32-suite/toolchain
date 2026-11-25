@@ -217,7 +217,7 @@ public final class Bp {
                 BpBuild proj = BpBuild.load(abs);
                 for (String w : proj.warnings) Main.diag().println("aviso proyecto: " + w);   // V9 #897
                 boolean ok = Main.buildProject(proj, "mivm", /*pruneBpi*/ true);
-                Path dir = Paths.get(proj.outDir), mod = dir.resolve(proj.main + ".mod");
+                Path dir = Paths.get(proj.outDir), mod = proj.modDelMain();
                 return new Compilado(ok ? 0 : 2, mod, "pack".equals(proj.out) ? dir.resolve(proj.packName + ".pack")
                                                       : Files.isRegularFile(mod) ? mod : dir);
             }

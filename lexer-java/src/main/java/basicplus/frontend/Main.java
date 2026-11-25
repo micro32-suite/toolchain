@@ -74,21 +74,27 @@ public final class Main {
         cfgDelHospedador = cfg;
     }
 
-    /** El nombre del módulo de un fuente (su {@code module Nombre}): el del .mod que escribe el compilador. Sin
-     *  declaración, el nombre del fichero sin la extensión. V9 #853: lo usan el IDE (antes era suyo, el
-     *  {@code inferModuleName} de FrmMain) y la orden {@code bp}; uno para los dos, que no se separen. */
+    /** El nombre del módulo de un fuente (su {@code module Nombre}, con su {@code library} delante si la dice): el del
+     *  .mod que escribe el compilador. Sin declaración, el nombre del fichero sin la extensión. V9 #853: lo usan el IDE
+     *  (antes era suyo, el {@code inferModuleName} de FrmMain) y la orden {@code bp}; uno para los dos, que no se
+     *  separen. V9 #901: la library, que se saltaba («no se encontró Prog.mod», y es com.ejemplo.Prog.mod). */
     public static String nombreDelModulo(Path fuente) {
+        String library = "";
         try {
             for (String line : Files.readAllLines(fuente, java.nio.charset.StandardCharsets.UTF_8)) {
                 String t = line.trim();
                 if (t.isEmpty() || t.startsWith("//")) continue;
-                if (t.startsWith("library")) continue;
+                if (t.startsWith("library")) {
+                    int a = t.indexOf('"'), b = a < 0 ? -1 : t.indexOf('"', a + 1);
+                    if (b > a) library = t.substring(a + 1, b);
+                    continue;
+                }
                 if (t.startsWith("module")) {
                     String rest = t.substring("module".length()).trim();
                     int end = 0;
                     while (end < rest.length()
                             && (Character.isJavaIdentifierPart(rest.charAt(end)) || rest.charAt(end) == '.')) end++;
-                    if (end > 0) return rest.substring(0, end);
+                    if (end > 0) return nombreCanonico(library, rest.substring(0, end));
                 }
             }
         } catch (IOException ignored) { }
@@ -173,6 +179,9 @@ public final class Main {
          *  se SABE, no se declara: preguntarlo otra vez en el `.bpbuild` sería un
          *  segundo sitio para la misma verdad, y los dos sitios se separan. */
         boolean raizTieneMain = false;
+        /** V9 #897 — false en un módulo de `sources` que no es el main del proyecto: no se avisa de que no define main
+         *  (un aviso que sale en cada build deja de leerse). */
+        boolean esperaMain = true;
 
         /** V5/H11 (#365) — CÓMO SE LLAMA la entrada del módulo de arranque dentro
          *  del pack: su nombre canónico, cualificado si declara `library`
@@ -426,6 +435,8 @@ public final class Main {
              * decide si el pack es ejecutable es si ALGUNA la tiene — y en la
              * práctica sólo puede tenerla la que nombra `main`. */
             boolean teniaMain = ctx.raizTieneMain;
+            ctx.esperaMain = proj.sources.isEmpty()
+                    || raiz.getFileName().toString().replaceFirst("[.](bp|jc)$", "").equals(proj.main);
             if (!compileFull(raiz, ctx, /*depth*/0)) ok = false;
             ctx.raizTieneMain = teniaMain || ctx.raizTieneMain;
         }
@@ -909,6 +920,7 @@ public final class Main {
                 if (parsed.module != null) {
                     try {
                         SemanticAnalyzer recAnalyzer = new SemanticAnalyzer();
+                        recAnalyzer.esperaMain = ctx.esperaMain;
                         injectImplicitCoreImport(parsed.module);
                         injectImplicitCollectionsImport(parsed.module);   // #450
                         if (parsed.module.imports != null) {
@@ -947,6 +959,7 @@ public final class Main {
 
             // 2) Cargar .bpi disponibles en el analizador.
             SemanticAnalyzer analyzer = new SemanticAnalyzer();
+            analyzer.esperaMain = ctx.esperaMain;
             int impErrsBefore = ctx.totalErrors;
             injectImplicitCoreImport(module);          // #248/#450 — ahora SIEMPRE
             injectImplicitCollectionsImport(module);   // #450 — solo si nombra SyncList/OwnerList
