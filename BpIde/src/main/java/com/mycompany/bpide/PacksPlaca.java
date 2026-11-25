@@ -478,7 +478,7 @@ public final class PacksPlaca {
         new SwingWorker<BpvmClient.PackTable, Void>() {
             @Override protected BpvmClient.PackTable doInBackground() throws Exception { return c.packList(T); }
             @Override protected void done() {
-                StringBuilder s = new StringBuilder("La IA pide FORMATEAR la zona de packs de la placa conectada:\n\n   ")
+                StringBuilder s = new StringBuilder("FORMATEAR la zona de packs de la placa conectada:\n\n   ")
                         .append(placa).append("\n\n");
                 try {
                     List<String> activos = new ArrayList<>();

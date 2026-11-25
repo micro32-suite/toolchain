@@ -43,14 +43,17 @@ public final class EntornoPlaca {
 
     private final Comandos comandos;
     private final Supplier<BpvmClient> cliente;
+    private final Supplier<String> quePlaca;
     private final Consumer<String> consola;
     private final List<Consumer<List<BpvmClient.EnvVar>>> mirando = new CopyOnWriteArrayList<>();
 
     /** `cliente`: el de la conexión de ahora (null sin ella); se pide en cada comando, que entre uno y otro puede haber
-     *  cambiado la placa. `consola`: la del IDE, desde cualquier hilo. */
-    public EntornoPlaca(Comandos comandos, Supplier<BpvmClient> cliente, Consumer<String> consola) {
+     *  cambiado la placa. `quePlaca`: cómo se la llama al preguntar por ella. `consola`: la del IDE, desde cualquier hilo. */
+    public EntornoPlaca(Comandos comandos, Supplier<BpvmClient> cliente, Supplier<String> quePlaca,
+                        Consumer<String> consola) {
         this.comandos = comandos;
         this.cliente = cliente;
+        this.quePlaca = quePlaca;
         this.consola = consola != null ? consola : s -> { };
         registra();
     }
@@ -126,11 +129,11 @@ public final class EntornoPlaca {
         return new Cambio(esta.key, estaba == null ? null : estaba.value, esta.value, quedan);
     }
 
-    /** Borra `clave`; null si no estaba (no se escribe nada). */
+    /** Borra `clave`; si no estaba (`antes`, null), no se escribe nada. */
     public static Cambio borra(BpvmClient c, String clave) throws IOException {
         List<BpvmClient.EnvVar> hay = c.envList(T);
         BpvmClient.EnvVar estaba = busca(hay, clave);
-        if (estaba == null) return null;
+        if (estaba == null) return new Cambio(clave, null, null, hay);
         c.envDel(estaba.key, T);
         List<BpvmClient.EnvVar> quedan = c.envList(T);
         if (busca(quedan, clave) != null) throw new IOException("la placa no borró " + estaba.key);
@@ -151,19 +154,24 @@ public final class EntornoPlaca {
                 .corto("Añadir / editar…")
                 .explica("Pone una variable de entorno en la placa conectada (o en el micro simulado): la crea, o le"
                         + " cambia el valor. Se escribe en su flash y sobrevive a regrabar la imagen; si ya valía eso, no"
-                        + " se escribe. Devuelve lo que había («antes», si estaba: para poder dejarla como estaba) y todas"
-                        + " las que quedan («variables»). Casi todas se leen al arrancar: valen tras «placa_reiniciar»,"
+                        + " se escribe. Si ya está con otro valor, se le pregunta antes a la persona que usa el IDE (es de"
+                        + " la placa); con «rw», no. Devuelve lo que había («antes», si estaba: para poder dejarla como"
+                        + " estaba) y todas las que quedan («variables»). Casi todas se leen al arrancar: valen tras"
+                        + " «placa_reiniciar»,"
                         + " con «reconectar». Pon sólo claves de la referencia, apéndice A, con un valor de los que dice"
                         + " para esa placa: una que el firmware no conoce se guarda y nadie la lee, y lo que se da a"
                         + " packRam o a SQLite se le quita a la memoria de los programas.")
                 .parametro("clave", "la variable (packRam, display, sd, log…); no distingue mayúsculas")
                 .parametro("valor", "su valor, en una línea, como en la referencia (512, st7701, cs:23,bus:2…)")
-                .necesita("clave", "valor");
+                .parametro("rw", "sino", "true: la cambia sin preguntar, aunque ya esté con otro valor (sólo si quien usa el"
+                        + " IDE ya lo ha dicho)")
+                .necesita("clave", "valor")
+                .pregunta(this::laQueYaEsta);
         comandos.registra("entorno_borrar", "Variables de entorno: borrar", this::borra)
                 .corto("Borrar")
                 .explica("Borra una variable de entorno de la placa conectada (o del micro simulado): el firmware vuelve a"
-                        + " lo que hace sin ella (casi siempre, tras «placa_reiniciar»). Devuelve lo que valía («antes») y"
-                        + " las que quedan («variables»).")
+                        + " lo que hace sin ella (casi siempre, tras «placa_reiniciar»). Devuelve lo que valía («antes»; si"
+                        + " no estaba, no hay nada que borrar, y lo dice) y las que quedan («variables»).")
                 .parametro("clave", "la variable que borrar")
                 .necesita("clave");
     }
@@ -196,17 +204,44 @@ public final class EntornoPlaca {
         });
     }
 
+    /** Lo que se le pregunta a la persona antes de cambiar, por su nombre, una variable que ya está con otro valor (Eduardo,
+     *  25-nov: «Añadir una opción sobreescribir […] rw para que no pregunte cada vez»). null: no hay qué preguntar (no está,
+     *  ya vale eso, es «rw», o no vale lo que se pide: lo dirá el comando). */
+    private CompletableFuture<String> laQueYaEsta(Map<String, Object> p) {
+        final String clave = texto(p.get("clave"));
+        final String valor = texto(p.get("valor"));
+        final BpvmClient c = cliente.get();
+        final CompletableFuture<String> fin = new CompletableFuture<>();
+        if (Boolean.TRUE.equals(p.get("rw")) || c == null || noValeLaClave(clave) != null || noValeElValor(valor) != null) {
+            fin.complete(null);
+            return fin;
+        }
+        new SwingWorker<BpvmClient.EnvVar, Void>() {
+            @Override protected BpvmClient.EnvVar doInBackground() throws Exception { return busca(c.envList(T), clave); }
+            @Override protected void done() {
+                try {
+                    BpvmClient.EnvVar esta = get();
+                    fin.complete(esta == null || esta.value.equals(valor) ? null
+                            : "CAMBIAR una variable de entorno de la placa conectada:\n\n   " + quePlaca.get() + "\n\n"
+                              + esta.key + ": de «" + esta.value + "» a «" + valor + "».");
+                } catch (Exception e) {
+                    fin.complete(null);   // no se deja leer: lo dirá el comando
+                }
+            }
+        }.execute();
+        return fin;
+    }
+
     /** «entorno_borrar»: quita una variable. */
     private CompletableFuture<Resultado> borra(Map<String, Object> p) {
         final String clave = texto(p.get("clave"));
         String no = noValeLaClave(clave);
         if (no != null) return noVale(p, "entorno_borrar: " + no, no);
         return enSegundoPlano(p, c -> borra(c, clave), ch -> {
-            if (ch == null) {
-                String m = "no hay ninguna variable «" + clave + "» en la placa.";
-                return sobre(p, Resultado.aviso(TITULO, m, JOptionPane.INFORMATION_MESSAGE));
-            }
             avisa(ch.quedan);
+            if (ch.antes == null) {   // lo que se pedía —que no esté— ya es así
+                return conElCambio(Resultado.bien("no hay ninguna variable «" + clave + "» en la placa: nada que borrar"), ch);
+            }
             String que = ch.clave + ", borrada (valía " + ch.antes + ")";
             consola.accept("[Placa] entorno: " + que);
             return conElCambio(Resultado.bien(que + CUANDO), ch);

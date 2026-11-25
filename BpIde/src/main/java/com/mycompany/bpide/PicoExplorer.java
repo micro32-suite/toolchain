@@ -136,7 +136,7 @@ public final class PicoExplorer extends JPanel {
         super(new BorderLayout());
         this.comandos = comandos;
         registraComandos();
-        entorno = new EntornoPlaca(comandos, this::debugClient, this::emitLine);
+        entorno = new EntornoPlaca(comandos, this::debugClient, this::quePlaca, this::emitLine);
         packs = new PacksPlaca(comandos, this::debugClient, this::deviceArch, this::quePlaca,
                 this::reconectarTrasReinicio, this::emitLine);
 
@@ -419,6 +419,13 @@ public final class PicoExplorer extends JPanel {
                         + " otra vez a él; sin él, la conexión se cierra (para seguir, «placa_conectar»).")
                 .parametro("reconectar", "sino", "true: espera a que vuelva y se conecta otra vez")
                 .pide(this::pideElReinicio);
+        comandos.registra("placa_comprobar", "Comprobar la placa", this::comprueba)
+                .explica("Bien si la placa conectada (o el micro simulado) es la que se espera, por su micro; mal si es otra o"
+                        + " no hay ninguna. Es la primera línea de un guion para una placa: si no es, no se toca nada.")
+                .parametro("micro", "el micro que se espera, como lo dice su INFO: rp2350a (Pico 2), rp2350b (Metro),"
+                        + " esp32s3, esp32c3, esp32c5, esp32c6, esp32p4, stm32u575 (Nucleo), stm32u5g9 (Discovery) o host"
+                        + " (el micro simulado)")
+                .necesita("micro");
         comandos.registra("placa_info", "Info", this::elInfo)
                 .explica("El INFO del dispositivo conectado: su micro, la memoria, la flash, la arquitectura, la imagen…"
                         + " («info», tal cual lo manda, y «texto», como lo enseña el IDE).");
@@ -663,6 +670,8 @@ public final class PicoExplorer extends JPanel {
                 emitLine("  autorun=app que arranca al boot (/sys/auto.txt); con la app corriendo");
                 emitLine("          el IDE puede conectar y pararla con kill");
                 emitLine("  help error    — qué significa cada código de salida de un programa");
+                emitLine("  comandos [texto] — los del IDE (compilar, packs_listar, guion…): se escriben aquí como en un");
+                emitLine("                     guion, con sus parámetros: entorno_poner clave=log valor=1");
                 emitLine("  (doble-clic en el árbol: .mod ejecuta, el resto abre el editor)");
                 return;
             case "cls":
@@ -682,7 +691,16 @@ public final class PicoExplorer extends JPanel {
                     return;
                 }
                 break;
+            case "comandos":   // V9 #891
+                for (String c : comandos.describe()) {
+                    if (arg.isEmpty() || c.toLowerCase().contains(arg.toLowerCase())) emitLine("  " + c);
+                }
+                return;
             default:
+                if (comandos.get(parts[0]) != null) {   // V9 #891 (detrás del eco de la línea, que va a la cola)
+                    SwingUtilities.invokeLater(() -> comandoDelIde(line));
+                    return;
+                }
                 break;
         }
 
@@ -1058,6 +1076,46 @@ public final class PicoExplorer extends JPanel {
                 emitLine("  error: " + ex.getMessage());
             }
         }, "bpconsole").start();
+    }
+
+    /** V9 #891 — un comando del IDE escrito en la consola, con la forma de una línea de guion. El que es su diálogo, lo
+     *  abre; los demás, por su nombre, como desde un guion (lo que no se deshace, pregunta). Sus rutas, desde la carpeta de
+     *  trabajo, como las de `copy`. */
+    private void comandoDelIde(String linea) {
+        String no;
+        try {
+            Guion.Linea l = Guion.parte(linea);
+            Comandos.Comando c = comandos.get(l.comando);
+            if (c.esSoloVentana() && l.parametros.isEmpty()) { comandos.desdeLaVentana(c.id); return; }
+            Comandos.Quien quien = new Comandos.Quien("la consola",
+                    r -> new java.io.File(r).getAbsoluteFile().toPath().normalize().toString());
+            no = Comandos.revisa(c, l.parametros, quien.ruta);
+            if (no == null) {
+                comandos.ejecuta(c.id, l.parametros, quien).thenAccept(r -> {
+                    if (r.datos().containsKey("pasos")) return;   // un guion: lo ha ido diciendo
+                    for (String m : (r.ok ? r.mensaje : "MAL: " + r.mensaje).split("\n")) emitLine("  " + m);
+                });
+                return;
+            }
+        } catch (IllegalArgumentException e) {
+            no = e.getMessage();
+        }
+        emitLine("  " + no);
+    }
+
+    /** «placa_comprobar»: ¿es la placa que se espera? Por su micro, el del INFO. */
+    private CompletableFuture<Resultado> comprueba(Map<String, Object> p) {
+        final String espera = String.valueOf(p.get("micro")).trim();
+        final BpvmClient c = debugClient();
+        if (c == null) return listo(Resultado.mal("no hay ninguna placa conectada"));
+        final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        runAsync(() -> {
+            java.util.Map<String, Object> m = c.getInfo(4000);
+            return istr(m, "micro").isEmpty() ? istr(m, "boardName") : istr(m, "micro");
+        }, micro -> fin.complete((espera.equalsIgnoreCase(micro) ? Resultado.bien("la placa es un " + micro)
+                : Resultado.mal("la placa conectada es un " + micro + ", no un " + espera)).con("micro", micro)),
+                porque -> fin.complete(Resultado.mal("placa_comprobar: " + porque)));
+        return fin;
     }
 
     /** H6.b.3.b — el {@link BpvmClient} de la conexión activa (serie/TCP) para

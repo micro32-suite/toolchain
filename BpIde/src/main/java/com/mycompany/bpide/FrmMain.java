@@ -669,6 +669,7 @@ public class FrmMain extends javax.swing.JFrame
 
         setupDebug();
         setupIa();     // V9 H2.3: el menú IA (el servidor para la IA), entre Debug y Help
+        setupGuiones();   // V9 #891: el menú Guiones, detrás
         setupHelp();
         setupToolbar();   // H12: barra de botones (archivos · ejecución · edición)
 
@@ -1251,8 +1252,7 @@ public class FrmMain extends javax.swing.JFrame
             return listo(Resultado.aviso("Build Project",
                     "No hay proyecto abierto. Abre o crea un proyecto (.bpbuild).", JOptionPane.INFORMATION_MESSAGE));
         }
-        consolaArea.setText("");
-        errors.clear();
+        empiezaLaSalida();
         final basicplus.frontend.BpBuild proj = currentProject;
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         final StringBuilder salida = new StringBuilder();
@@ -2433,8 +2433,7 @@ public class FrmMain extends javax.swing.JFrame
         Resultado antes = antesDeCompilar("depurar", p, /*aLaPlaca*/ false, /*ejecuta*/ true);
         if (antes != null) return listo(antes);
 
-        consolaArea.setText("");
-        errors.clear();
+        empiezaLaSalida();
         debug.reset();
         debuggingActive = true;
         empiezaUnaDepuracion();
@@ -2604,6 +2603,18 @@ public class FrmMain extends javax.swing.JFrame
         menuIa.add(miServidorIa);
         menuIa.add(new JMenuItem(comandos.accion("conectar_ia")));
         jMenuBar1.add(menuIa);
+    }
+
+    /** Los guiones (V9 #891). */
+    private Guiones guiones;
+
+    /** V9 #891 — el menú Guiones (Eduardo: «si»): ejecutar uno y pararlo. Los comandos, en {@link Guiones}. */
+    private void setupGuiones() {
+        guiones = new Guiones(comandos, s -> appendConsola(s + "\n"), this);
+        JMenu menu = new JMenu("Guiones");
+        menu.add(new JMenuItem(comandos.accion("guion")));
+        menu.add(new JMenuItem(comandos.accion("guion_parar")));
+        jMenuBar1.add(menu);
     }
 
     /** «servidor_ia», sólo desde la ventana: lo enciende (eligiendo la carpeta de la IA) o lo apaga. */
@@ -3352,8 +3363,7 @@ public class FrmMain extends javax.swing.JFrame
         Resultado antes = antesDeCompilar("ejecutar_ventana", p, /*aLaPlaca*/ false, /*ejecuta*/ true);
         if (antes != null) return listo(antes);
 
-        consolaArea.setText("");
-        errors.clear();
+        empiezaLaSalida();
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         final StringBuilder salida = new StringBuilder();
         final java.util.concurrent.atomic.AtomicBoolean compilo = new java.util.concurrent.atomic.AtomicBoolean(false);
@@ -3534,8 +3544,7 @@ public class FrmMain extends javax.swing.JFrame
         Resultado antes = antesDeCompilar(que, p, /*aLaPlaca*/ false, execute);
         if (antes != null) return listo(antes);
 
-        consolaArea.setText("");
-        errors.clear();
+        empiezaLaSalida();
         ultimoExited = null;
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
         final StringBuilder salida = new StringBuilder();
@@ -3629,6 +3638,26 @@ public class FrmMain extends javax.swing.JFrame
         return fin;
     }
 
+    /** V9 #891 — dónde empieza, en la consola, la salida de la orden de ahora (compilar, ejecutar, depurar…). */
+    private int inicioDeLaSalida;
+
+    /** Empieza una orden con salida: la consola y la tabla de errores, vacías. Dentro de un guion la consola no: los pasos
+     *  de antes se siguen viendo. */
+    private void empiezaLaSalida() {
+        if (guiones != null && guiones.enMarcha()) {
+            inicioDeLaSalida = consolaArea.getDocument().getLength();
+        } else {
+            consolaArea.setText("");
+            inicioDeLaSalida = 0;
+        }
+        errors.clear();
+    }
+
+    private String laSalida() {
+        String s = consolaArea.getText();
+        return s.substring(Math.min(inicioDeLaSalida, s.length()));
+    }
+
     /** V9 H2.2 — el resultado de «compilar» y «ejecutar»: los errores (de la tabla), la salida de la consola y, si se
      *  ejecutó, cómo acabó el programa. */
     private Resultado resultadoDeCompilar(String que, boolean execute, boolean compilo, String salida) {
@@ -3667,8 +3696,7 @@ public class FrmMain extends javax.swing.JFrame
         Resultado antes = antesDeCompilar("ejecutar_placa", p, /*aLaPlaca*/ true, /*ejecuta*/ true);
         if (antes != null) return listo(antes);
 
-        consolaArea.setText("");
-        errors.clear();
+        empiezaLaSalida();
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
 
         final Path bpFile;
@@ -3815,7 +3843,7 @@ public class FrmMain extends javax.swing.JFrame
                 if (sinLlegar != null) {
                     final Resultado r = sinLlegar;
                     SwingUtilities.invokeLater(() -> fin.complete(
-                            r.con("errores", erroresEnDatos()).con("salida", consolaArea.getText())));
+                            r.con("errores", erroresEnDatos()).con("salida", laSalida())));
                 }
             }
         }.execute();
@@ -3823,8 +3851,8 @@ public class FrmMain extends javax.swing.JFrame
     }
 
     /** V9 H2.2 — el resultado de «ejecutar_placa», con lo que dice el panel al acabar («exit N (…)», o «error: …» si
-     *  la subida falló): los errores, la salida de la consola (la de este programa: se vació al empezar) y cómo acabó
-     *  el programa en la placa. */
+     *  la subida falló): los errores, la salida de la consola (la de este programa) y cómo acabó el programa en la
+     *  placa. */
     private Resultado resultadoDeLaPlaca(String estado) {
         Resultado r;
         edu.bpgenvm.vm.debug.ExitedEvent ex = picoExplorer.ultimoExited();
@@ -3839,7 +3867,7 @@ public class FrmMain extends javax.swing.JFrame
             if (ex.elapsedMs >= 0) r.con("ms", ex.elapsedMs);
             if (ex.stackTrace != null && !ex.stackTrace.isEmpty()) r.con("traza", ex.stackTrace);
         }
-        return r.con("fin", estado).con("errores", erroresEnDatos()).con("salida", consolaArea.getText());
+        return r.con("fin", estado).con("errores", erroresEnDatos()).con("salida", laSalida());
     }
 
     /**
@@ -3975,8 +4003,7 @@ public class FrmMain extends javax.swing.JFrame
         Resultado antes = antesDeCompilar("depurar_placa", p, /*aLaPlaca*/ true, /*ejecuta*/ true);
         if (antes != null) return listo(antes);
 
-        consolaArea.setText("");
-        errors.clear();
+        empiezaLaSalida();
         empiezaUnaDepuracion();
         final CompletableFuture<Resultado> fin = esperaLaProximaParada();
 

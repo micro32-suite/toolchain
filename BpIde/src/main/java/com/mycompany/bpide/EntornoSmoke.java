@@ -88,7 +88,10 @@ public final class EntornoSmoke {
         AtomicReference<BpvmClient> conexion = new AtomicReference<>();
         List<String> consola = java.util.Collections.synchronizedList(new ArrayList<>());
         Comandos cs = new Comandos(null);
-        EntornoPlaca entorno = new EntornoPlaca(cs, conexion::get, consola::add);
+        List<String> preguntas = new ArrayList<>();
+        final boolean[] contesta = { true };
+        cs.setPreguntador(t -> { preguntas.add(t); return contesta[0]; });   // sin diálogos en la pantalla
+        EntornoPlaca entorno = new EntornoPlaca(cs, conexion::get, () -> "placa de prueba", consola::add);
 
         // 1. sin placa
         Resultado r = haz(cs, "entorno_listar");
@@ -109,9 +112,22 @@ public final class EntornoSmoke {
         r = haz(cs, "entorno_poner", "clave", "log", "valor", "1");
         mira(r.ok && "log".equals(r.datos().get("clave")) && !r.datos().containsKey("antes")
                 && vars(r, "variables").contains("log=1") && r.mensaje.startsWith("log=1 (no estaba)"), "poner: " + r);
-        mira("1".equals(cli.envGet("log", 8000)), "la placa la tiene");
+        mira("1".equals(cli.envGet("log", 8000)) && preguntas.isEmpty(), "la placa la tiene, y no se ha preguntado nada");
+
+        //    ya está con otro valor: pregunta (V9 #891); con un no, ni tocarla; con rw, no pregunta
+        contesta[0] = false;
         r = haz(cs, "entorno_poner", "clave", "log", "valor", "0");
-        mira(r.ok && "1".equals(r.datos().get("antes")) && "0".equals(r.datos().get("valor")), "cambiar, con lo de antes: " + r);
+        mira(!r.ok && r.mensaje.contains("no lo ha autorizado") && "1".equals(cli.envGet("log", 8000)) && preguntas.size() == 1
+                && preguntas.get(0).contains("placa de prueba") && preguntas.get(0).contains("log: de «1» a «0»"),
+                "con otro valor pregunta, y con un no, no la toca: " + preguntas);
+        contesta[0] = true;
+        r = haz(cs, "entorno_poner", "clave", "log", "valor", "0");
+        mira(r.ok && "1".equals(r.datos().get("antes")) && "0".equals(r.datos().get("valor")) && preguntas.size() == 2,
+                "cambiar, con lo de antes: " + r);
+        r = haz(cs, "entorno_poner", "clave", "log", "valor", "2", "rw", true);
+        mira(r.ok && "0".equals(r.datos().get("antes")) && "2".equals(cli.envGet("log", 8000)) && preguntas.size() == 2,
+                "con rw, sin preguntar: " + r.mensaje);
+        haz(cs, "entorno_poner", "clave", "log", "valor", "0", "rw", true);
         int dichas = consola.size();
         r = haz(cs, "entorno_poner", "clave", "LOG", "valor", "0");
         mira(r.ok && r.mensaje.contains("ya valía 0") && consola.size() == dichas, "ya valía eso (LOG es log): " + r.mensaje);
@@ -146,7 +162,7 @@ public final class EntornoSmoke {
         mira(r.ok && "0".equals(r.datos().get("antes")) && !vars(r, "variables").contains("log=0")
                 && "log".equals(r.datos().get("clave")), "borrar, con lo que valía: " + r);
         r = haz(cs, "entorno_borrar", "clave", "log");
-        mira(!r.ok && r.mensaje.contains("no hay ninguna variable «log»"), "y otra vez, no está: " + r.mensaje);
+        mira(r.ok && r.mensaje.contains("nada que borrar") && !r.datos().containsKey("antes"), "y otra vez, no está: " + r);
 
         // 7. el diálogo, sin enseñarlo: lo que hay al abrirlo, y lo que cambia otro
         if (GraphicsEnvironment.isHeadless()) {

@@ -112,7 +112,12 @@ code. Files on the PC: only inside the folder the user allowed.
   live in its flash, outside its files: `entorno_listar`, `entorno_poner` and `entorno_borrar`. Which ones there are, and
   their values for each board: appendix A of the reference. Most are read when the board starts: after changing one,
   `placa_reiniciar` with `reconectar: true`. They are the board's, not the program's: change only what the task needs,
-  and tell the user what there was (`antes`, in the result).
+  and tell the user what there was (`antes`, in the result). One that already has another value is asked to the user on
+  the screen before changing it; `rw: true` skips that question: only if the user has already agreed.
+- **Scripts (guiones)**: a text file with these same tools, one per line (`entorno_poner clave=log valor=1`; a value with
+  spaces, between quotes; a bare yes/no parameter is true; `//`, a comment), that stops at the first one that fails:
+  `guion`, with one of the installation's (`guiones_listar`: installing the GUI or the database on a board, from
+  scratch) or a `.guion` of yours. Write one when the user wants to repeat a task without you. IDE guide §14.
 - **The simulated micro keeps its state** between runs, like a board (its file system and its packs). If it carries
   things from before (old files in `/app`, a library that does not export what the program uses),
   `micro_simulado` with `de_cero: true` empties it (all its files and its packs zone; its configuration, the

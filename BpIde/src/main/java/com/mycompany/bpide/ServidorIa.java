@@ -13,8 +13,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -239,7 +237,9 @@ public final class ServidorIa {
                 + " «ejecutar_placa». Los ajustes de la placa (sus variables de entorno: la memoria de los packs, el panel,"
                 + " la SD…): «entorno_listar», «entorno_poner» y «entorno_borrar»; se leen al arrancar («placa_reiniciar»,"
                 + " con «reconectar»). Sus packs (la biblioteca estándar, la GUI, la base de datos…): «packs_listar»,"
-                + " «pack_ficheros», «pack_grabar», «pack_borrar» y «packs_formatear». Para depurar: «punto_parada», «depurar» y los pasos. Las rutas del PC, dentro de "
+                + " «pack_ficheros», «pack_grabar», «pack_borrar» y «packs_formatear». Para repetir una tarea sin ti, un guion"
+                + " (estos comandos, uno por línea en un fichero): «guion» y «guiones_listar». Para depurar: «punto_parada»,"
+                + " «depurar» y los pasos. Las rutas del PC, dentro de "
                 + carpeta + " (una relativa se toma desde ahí). Un programa a la vez; uno que no acaba (una GUI), se"
                 + " para con «parar». Con la placa, una herramienta cada vez, no varias a la vez: atiende un listado,"
                 + " una subida o una bajada cada vez, y a lo que llega a destiempo contesta «ocupada». La documentación"
@@ -303,47 +303,21 @@ public final class ServidorIa {
         return e;
     }
 
-    /** Una llamada: los argumentos, mirados (sólo los documentados, los que hacen falta, y las rutas dentro de la
-     *  carpeta); el comando, por su nombre; y su resultado, en datos. */
+    /** Una llamada: los argumentos, mirados ({@link Comandos#revisa}: sólo los documentados, los que hacen falta, y las
+     *  rutas dentro de la carpeta); el comando, por su nombre; y su resultado, en datos. En la consola, con la forma de
+     *  los guiones (V9 #891): lo que hace la IA se copia a uno. */
     private Map<String, Object> llama(Comandos.Comando c, Map<String, Object> args) {
-        Map<String, Object> p = new LinkedHashMap<>();
-        List<String> sobran = new ArrayList<>();
-        for (Map.Entry<String, Object> a : args.entrySet()) {
-            if (c.parametros().containsKey(a.getKey())) p.put(a.getKey(), a.getValue());
-            else sobran.add(a.getKey());
-        }
-        if (!sobran.isEmpty()) {
-            return error(c.id + " no tiene " + (sobran.size() == 1 ? "el parámetro " : "los parámetros ") + sobran
-                    + "; los suyos: " + c.parametros().keySet());
-        }
-        for (String n : c.necesarios()) {
-            if (p.get(n) == null) return error(c.id + " necesita «" + n + "»: " + c.parametros().get(n));
-        }
-        for (Map.Entry<String, Object> a : p.entrySet()) {
-            String tipo = c.tipoDe(a.getKey());
-            if (tipo.equals("ruta")) {
-                String r = dentro(a.getValue());
-                if (r == null) return error(c.id + ": «" + a.getValue() + "» está fuera de la carpeta de la IA (" + carpeta + ")");
-                a.setValue(r);
-            } else if (tipo.equals("rutas")) {
-                List<Object> rs = new ArrayList<>();
-                Collection<?> vs = (a.getValue() instanceof Collection) ? (Collection<?>) a.getValue()
-                                                                       : Collections.singletonList(a.getValue());
-                for (Object v : vs) {
-                    String r = dentro(v);
-                    if (r == null) return error(c.id + ": «" + v + "» está fuera de la carpeta de la IA (" + carpeta + ")");
-                    rs.add(r);
-                }
-                a.setValue(rs);
-            }
-        }
-        consola.accept("[ia] " + c.id + (p.isEmpty() ? "" : " " + Json.write(p)) + "\n");
+        Map<String, Object> p = new LinkedHashMap<>(args);
+        Comandos.Quien quien = new Comandos.Quien("la IA", this::dentro);
+        String no = Comandos.revisa(c, p, quien.ruta);
+        if (no != null) return error(no);
+        consola.accept("[ia] " + Guion.escribe(c.id, p) + "\n");
         Resultado r;
         try {
-            r = comandos.ejecuta(c.id, p).get(plazoMs, TimeUnit.MILLISECONDS);
+            r = comandos.ejecuta(c.id, p, quien).get(plazoMs, TimeUnit.MILLISECONDS);
         } catch (TimeoutException te) {
             String msg = c.id + ": sin acabar en " + (plazoMs / 1000) + " s; sigue en marcha (para pararlo, «parar»;"
-                    + " depurando, «parar_depuracion»)";
+                    + " depurando, «parar_depuracion»; un guion, «guion_parar»)";
             consola.accept("[ia] → " + msg + "\n");
             return error(msg);
         } catch (InterruptedException ie) {
@@ -362,13 +336,16 @@ public final class ServidorIa {
         return resultado(texto, estructura, !r.ok);
     }
 
-    /** La ruta, absoluta y normalizada, si está dentro de la carpeta de la IA (una relativa, desde ella); null si no. */
-    private String dentro(Object v) {
-        if (v == null) return null;
-        Path r = Paths.get(v.toString());
+    /** La ruta, absoluta y normalizada (una relativa, desde la carpeta de la IA); si está fuera de ella, lanza con el
+     *  porqué. */
+    private String dentro(String v) {
+        Path r = Paths.get(v);
         if (!r.isAbsolute()) r = carpeta.resolve(r);
         r = r.toAbsolutePath().normalize();
-        return r.startsWith(carpeta) ? r.toString() : null;
+        if (!r.startsWith(carpeta)) {
+            throw new IllegalArgumentException("está fuera de la carpeta de la IA (" + carpeta + ")");
+        }
+        return r.toString();
     }
 
     private static Map<String, Object> resultado(String texto, Map<String, Object> estructura, boolean esError) {

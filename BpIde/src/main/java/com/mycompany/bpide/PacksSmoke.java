@@ -90,7 +90,7 @@ public final class PacksSmoke {
         List<String> preguntas = java.util.Collections.synchronizedList(new ArrayList<>());
         final boolean[] contesta = { false };
         Comandos cs = new Comandos(null);
-        cs.setPreguntador(t -> { preguntas.add(t); return contesta[0]; });
+        cs.setPreguntador(t -> { preguntas.add(t); return contesta[0]; });   // sin diálogos en la pantalla
         PacksPlaca packs = new PacksPlaca(cs, conexion::get, () -> 0, () -> "placa de prueba en el simulado",
                 (alVolver, alFallar) -> alFallar.accept("no hay explorador en la prueba"), consola::add);
         List<String> avances = java.util.Collections.synchronizedList(new ArrayList<>());

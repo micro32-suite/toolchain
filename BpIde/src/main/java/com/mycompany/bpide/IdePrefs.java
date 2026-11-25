@@ -158,6 +158,15 @@ public final class IdePrefs {
         return Files.isDirectory(repo) ? repo : null;
     }
 
+    /** V9 #891 — los guiones de la instalación: {@code guiones/} junto al jar (el ZIP la trae en su raíz) o, si no está,
+     *  en la carpeta de trabajo (en el repositorio, desde su raíz); null si no hay ninguna. */
+    static Path guionesDir() {
+        Path junto = installSubdir("guiones");
+        if (junto != null) return junto;
+        Path cwd = Paths.get(System.getProperty("user.dir", "."), "guiones");
+        return Files.isDirectory(cwd) ? cwd : null;
+    }
+
     /** Biblioteca de packs efectiva: la configurada; si no, la que VIAJA CON EL IDE
      *  (una carpeta `packs/` junto al jar) y por último `packs/` en el directorio
      *  de trabajo (útil en el repo). null si no hay ninguna — el compilador dirá
