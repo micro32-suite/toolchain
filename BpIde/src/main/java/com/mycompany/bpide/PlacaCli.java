@@ -79,6 +79,13 @@ public final class PlacaCli {
     /** El destino: «sim» (el micro simulado del IDE), un puerto serie («COM22», «/dev/ttyACM0») o una placa en la red
      *  («192.168.1.53», o con su puerto, «…:3333»), como en el panel de la placa del IDE. */
     private static Conexion abre(String destino) throws IOException {
+        Conexion c = conecta(destino);
+        String otra = (c.b instanceof AbstractBpvmBackend) ? ((AbstractBpvmBackend) c.b).avisoVersion() : null;
+        if (otra != null) err("bp: ⚠ " + otra);   // V9 #907
+        return c;
+    }
+
+    private static Conexion conecta(String destino) throws IOException {
         if ("sim".equalsIgnoreCase(destino)) {
             IdePrefs prefs = IdePrefs.load();
             String ep = "127.0.0.1:" + prefs.simPort;
@@ -222,6 +229,8 @@ public final class PlacaCli {
                 case "info": {
                     BpvmClient dc = c.cliente();
                     if (dc == null) { err("bp placa info: este destino no da su INFO"); return 1; }
+                    String v = VersionPlaca.enElInfo(dc.serverName(), dc.serverVersion(), VersionPlaca.mia());   // V9 #907
+                    if (!v.isEmpty()) System.out.println("version: " + v);
                     for (Map.Entry<String, Object> e : dc.getInfo(4000).entrySet()) {
                         if (e.getKey().equals("type") || e.getKey().equals("id")) continue;   // del cable, no de la placa
                         System.out.println(e.getKey() + ": " + e.getValue());

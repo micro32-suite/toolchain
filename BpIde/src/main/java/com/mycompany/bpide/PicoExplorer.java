@@ -119,7 +119,13 @@ public final class PicoExplorer extends JPanel {
     private final DefaultMutableTreeNode rootNode = new DefaultMutableTreeNode("Placa");
     private final DefaultTreeModel treeModel = new DefaultTreeModel(rootNode);
     private final JTree fileTree = new JTree(treeModel);
-    private final JLabel status = new JLabel("Disconnected");
+    /** La barra de abajo del panel: lo que no quepa, entero en su globo (V9 #907: con la versión de la imagen, es más larga). */
+    private final JLabel status = new JLabel("Disconnected") {
+        @Override public void setText(String t) {
+            super.setText(t);
+            setToolTipText(t);
+        }
+    };
 
     /** V9 H2.2 — los comandos del IDE: el panel registra los suyos, y sus botones llevan la Action de cada uno (la misma
      *  que usa quien lo llame por su nombre). */
@@ -341,8 +347,8 @@ public final class PicoExplorer extends JPanel {
                 .explica("Conecta el IDE a un dispositivo: una placa por su puerto serie (tipo serie, donde COM7), por"
                         + " la red (tipo red, donde su IP), la VM Java del PC (tipo vm, donde host:puerto) o el micro"
                         + " simulado (tipo simulado; antes, arrancarlo con «micro_simulado»). Con conectar false,"
-                        + " desconecta. Devuelve a qué se conectó y su arquitectura; un puerto que no existe dice los"
-                        + " que hay.")
+                        + " desconecta. Devuelve a qué se conectó, la versión de su imagen (y avisa si no es la de esta"
+                        + " instalación) y su arquitectura; un puerto que no existe dice los que hay.")
                 .parametro("conectar", "sino", "true conecta y false desconecta; sin él, alterna (como el botón)")
                 .parametro("tipo", "serie, red, vm o simulado (sin él, el que esté elegido en el panel)")
                 .parametro("donde", "el puerto (COM7), la IP de la placa o host:puerto de la VM Java; el simulado no"
@@ -1820,15 +1826,23 @@ public final class PicoExplorer extends JPanel {
             setConnectedUI(true);
             if (red) recuerdaPlacaRed(endpoint);
             status.setText(endpoint + " — " + hello);
+            final String otra = avisoVersion(b);                        // V9 #907: la imagen, de otra versión
+            if (otra != null && outputSink != null) outputSink.accept("[Explorer] ⚠ " + otra);
             CompletableFuture<Resultado> arbol = refresca();
             CompletableFuture<Void> arch = fetchDeviceArch();           // H11: la arch, ANTES de que haga falta compilar
             if (connectedSink != null) connectedSink.accept(debugClient());   // H9 escrutinio
             CompletableFuture.allOf(arbol, arch).whenComplete((v, ex) -> fin.complete(
-                    Resultado.bien("conectado a " + endpoint + " — " + hello).con("donde", endpoint)
-                            .con("backend", b.displayName()).con("hola", hello)
+                    Resultado.bien("conectado a " + endpoint + " — " + hello + (otra == null ? "" : ". ⚠ " + otra))
+                            .con("donde", endpoint).con("backend", b.displayName()).con("hola", hello)
+                            .con("version", debugClient() == null ? "" : debugClient().serverVersion())
                             .con("arquitectura", archName(deviceArch))));
         }, motivo -> fin.complete(Resultado.mal("no se pudo conectar a " + endpoint + ": " + motivo)));
         return fin;
+    }
+
+    /** V9 #907 — el aviso si la imagen de la placa (o el micro simulado) es de otra versión; null si no hay nada que decir. */
+    private static String avisoVersion(Backend b) {
+        return (b instanceof AbstractBpvmBackend) ? ((AbstractBpvmBackend) b).avisoVersion() : null;
     }
 
     private void soltarConexion(String estado) {
@@ -2681,25 +2695,27 @@ public final class PicoExplorer extends JPanel {
                 fin.complete(Resultado.mal("placa_info: INFO sin respuesta"));
                 return;
             }
-            String texto = formatInfo(m);
+            String texto = formatInfo(m, VersionPlaca.enElInfo(dc.serverName(), dc.serverVersion(), VersionPlaca.mia()));
             JTextArea area = new JTextArea(texto);
             area.setEditable(false);
             area.setFont(new Font("Consolas", Font.PLAIN, 12));
             fin.complete(Resultado.bienConDialogo("INFO de " + istr(m, "boardName"), "Device INFO — "
                             + b.displayName(), new JScrollPane(area), JOptionPane.PLAIN_MESSAGE)
-                    .sobre(this).con("info", m).con("texto", texto));
+                    .sobre(this).con("info", m).con("version", dc.serverVersion()).con("texto", texto));
         }, motivo -> fin.complete(Resultado.mal("placa_info: " + motivo)));
         return fin;
     }
 
-    /** Formatea el Map del INFO_REPLY (H7: micro/flash/RAM/PSRAM). */
-    private static String formatInfo(java.util.Map<String, Object> m) {
+    /** Formatea el Map del INFO_REPLY (H7: micro/flash/RAM/PSRAM). {@code version} (V9 #907): la de la imagen, que la dice
+     *  el HELLO; "", sin esa línea. */
+    private static String formatInfo(java.util.Map<String, Object> m, String version) {
         StringBuilder sb = new StringBuilder();
         String variant = istr(m, "variant");
         sb.append("Micro       : ").append(istr(m, "boardName"));
         if (!variant.isEmpty()) sb.append("  (RP2350").append(variant).append(")");
         sb.append('\n');
         sb.append("Serial      : ").append(istr(m, "uniqueId")).append('\n');
+        if (!version.isEmpty()) sb.append("Versión     : ").append(version).append('\n');
         long hz = ilong(m, "cpuFreqHz");
         if (hz > 0) sb.append("CPU         : ").append(hz / 1_000_000L).append(" MHz\n");
         long mtc = ilong(m, "tempMilliC");

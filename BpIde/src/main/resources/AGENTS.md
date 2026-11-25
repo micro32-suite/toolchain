@@ -102,6 +102,9 @@ code. Files on the PC: only inside the folder the user allowed.
   `@INSTALACION@bpide.bat --ia=<the absolute path of your working folder>` (from bash, if both paths have spaces, cmd
   cannot start it: use PowerShell). The IDE first asks the user, and writes how it went in one line of its output:
   `[ia] servidor para la IA en …` if allowed, another `[ia] …` line if not. Then connect (or reconnect).
+- **Connecting says the version of the board's firmware** (`imagen 8.5`) and warns if it is not this installation's; one
+  that does not say it is older than 8.5 (`imagen anterior a la 8.5`). With an older one, new things may not link or not
+  work: the user has to flash this installation's (`@INSTALACION@docs/en/INSTALAR_FIRMWARE.md`).
 - **A board keeps its standard library** (its `Stdlib.pack`), and the IDE does not upload a library the board already
   has in the same version. If a run on a board ends with `lib 'X' presente pero no exporta …`, the board's X is older
   than this installation's, and the line after it says where the board loads it from. From a pack: ask the user to let you

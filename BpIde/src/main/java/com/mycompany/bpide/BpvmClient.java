@@ -166,6 +166,9 @@ public final class BpvmClient implements AutoCloseable {
     /** V9 #869 — cómo se llama el otro lado, por su HELLO_REPLY (bpvm-esp32p4, bpvm-sim, bpvm-java…). */
     private volatile String serverName = "";
     public String serverName() { return serverName; }
+    /** V9 #907 — la versión de BasicPlus con que se compiló el otro lado; "" si no la dice (ver {@link VersionPlaca}). */
+    private volatile String serverVersion = "";
+    public String serverVersion() { return serverVersion; }
     /** V7/H8 #495 — el trozo y la ventana que la placa ANUNCIA en el HELLO_REPLY (`putChunk`, `putWindow`): se
      *  sube en trozos de ese tamaño con hasta esa cantidad sin acuse. 0 = no los anuncia (un firmware anterior, la
      *  VM-Java): se sube como siempre, en trozos de PUT_STREAM_CHUNK y con un acuse por trozo. */
@@ -513,6 +516,7 @@ public final class BpvmClient implements AutoCloseable {
     /** Lo que el HELLO_REPLY dice del server: su build y, desde #495, el trozo y la ventana de la subida. */
     private void aprenderHello(Map<String, Object> resp) {
         serverName  = Json.getString(resp, "serverName", "");
+        serverVersion = Json.getString(resp, "version", "");   // V9 #907
         serverBuild = Json.getString(resp, "serverBuild", "?");
         putTrozo    = (int) Json.getLong(resp, "putChunk", 0);
         putVentana  = (int) Json.getLong(resp, "putWindow", 0);

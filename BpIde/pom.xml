@@ -7,7 +7,10 @@
          ventana la lee del manifest del jar (ver Implementation-Version mas abajo
          y FrmMain.VERSION), asi que no hay un segundo numero que se quede rancio.
          Antes el titulo decia "BpIde [H9]" — una etiqueta interna de un hito viejo
-         que no le dice nada a un usuario y que ademas hoy significa otra cosa. -->
+         que no le dice nada a un usuario y que ademas hoy significa otra cosa.
+         V9 #907: las imagenes de las placas tambien la dicen, al conectar; como van en
+         otro repositorio, la tienen en su include/bpvm_version.h, y la red mira que sea
+         la de aqui (check_mods_embebidos.py). Al subir una, la otra. -->
     <version>8.1</version>
     <packaging>jar</packaging>
     <dependencies>

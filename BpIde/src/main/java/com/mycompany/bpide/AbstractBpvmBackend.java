@@ -69,7 +69,15 @@ public abstract class AbstractBpvmBackend implements Backend {
         try { postConnect(c); } catch (IOException ignored) { /* best effort */ }
         this.client = c;
         String quien = c.serverName().isEmpty() ? displayName() : c.serverName();
-        return quien + porDonde() + " @ " + endpoint;
+        String version = VersionPlaca.dicha(c.serverName(), c.serverVersion());   // V9 #907
+        return quien + porDonde() + (version.isEmpty() ? "" : ", " + version);   // el puerto lo pone quien lo enseña
+    }
+
+    /** V9 #907 — el aviso si la imagen de la placa (o el micro simulado) es de otra versión que esta instalación; null si es
+     *  la misma o si no se puede saber. */
+    public String avisoVersion() {
+        BpvmClient c = client;
+        return c == null ? null : VersionPlaca.aviso(c.serverName(), c.serverVersion(), VersionPlaca.mia());
     }
 
     @Override public boolean isConnected() {
