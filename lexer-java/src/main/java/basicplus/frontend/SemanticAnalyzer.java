@@ -597,21 +597,22 @@ public final class SemanticAnalyzer {
         for (ITopLevelDecl def : mod.defs)
             declareTopLevel(def, null, module.members);
 
-        // ¿inicializador de módulo? — función con el mismo nombre del módulo
+        // Entry point: 'main' (preferido, con arg: string) o 'Main' (legacy, sin params).
+        Symbol maybeMain = module.members.tryLookup("main");
+        if (maybeMain == null) maybeMain = module.members.tryLookup("Main");
+        if (maybeMain instanceof FunctionSymbol)
+            module.mainFunction = (FunctionSymbol) maybeMain;
+
+        // ¿inicializador de módulo? — función con el mismo nombre del módulo; salvo que sea el programa (V9 #886): un módulo
+        // que se llama Main, con su function Main, corría dos veces, al cargarse y como programa, sin un aviso.
         Symbol maybeInit = module.members.tryLookup(module.name);
-        if (maybeInit instanceof FunctionSymbol) {
+        if (maybeInit instanceof FunctionSymbol && maybeInit != module.mainFunction) {
             FunctionSymbol fInit = (FunctionSymbol) maybeInit;
             module.initializer = fInit;
             fInit.isModuleInitializer = true;
             if (fInit.isStatic)
                 err(fInit.line, fInit.column, "el inicializador del módulo no puede ser estático");
         }
-
-        // Entry point: 'main' (preferido, con arg: string) o 'Main' (legacy, sin params).
-        Symbol maybeMain = module.members.tryLookup("main");
-        if (maybeMain == null) maybeMain = module.members.tryLookup("Main");
-        if (maybeMain instanceof FunctionSymbol)
-            module.mainFunction = (FunctionSymbol) maybeMain;
 
         // E1: detectar colisiones entre los accesores sintéticos que va a
         //     emitir el backend para cada property y nombres ya en uso por
