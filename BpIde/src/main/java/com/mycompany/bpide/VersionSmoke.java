@@ -7,7 +7,7 @@
 //      dice `bp placa <…> info`, con su aviso, por la salida de errores.
 //
 // Uso:
-//   java -cp BpIde/target/BpIde-8.1.jar com.mycompany.bpide.VersionSmoke
+//   java -cp BpIde/target/BpIde-8.5.jar com.mycompany.bpide.VersionSmoke
 // Sale 0 si todo va, 1 si algo falla.
 // ============================================================
 package com.mycompany.bpide;

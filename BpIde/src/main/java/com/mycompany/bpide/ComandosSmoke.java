@@ -13,7 +13,7 @@ import javax.swing.SwingUtilities;
 
 /**
  * V9 H2.2 (22-nov) — la prueba de la capa de los comandos ({@link Comandos}), sin ventana:
- * <pre>java -Djava.awt.headless=true -cp BpIde-8.1.jar com.mycompany.bpide.ComandosSmoke</pre>
+ * <pre>java -Djava.awt.headless=true -cp BpIde-8.5.jar com.mycompany.bpide.ComandosSmoke</pre>
  * Lo que se mira: un comando llamado por su nombre desde otro hilo corre en el EDT y devuelve su resultado; uno que no
  * existe, o una lógica que revienta, es un resultado «mal», no una excepción; lo largo completa el resultado al acabar;
  * la Action es una y lleva el texto, la ayuda y el atajo del comando; y desde la ventana, un diálogo cancelado no

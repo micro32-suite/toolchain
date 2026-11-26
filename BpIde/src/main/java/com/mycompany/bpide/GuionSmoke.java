@@ -16,7 +16,7 @@ import javax.swing.SwingUtilities;
 /**
  * V9 #891 (25-nov) — la prueba de los guiones ({@link Guion}, {@link Guiones}), con los comandos de la placa de verdad
  * ({@link PicoExplorer}, sin enseñarlo) contra el micro simulado:
- * <pre>java -cp BpIde-8.1.jar com.mycompany.bpide.GuionSmoke [ruta de bpvm-sim.exe]</pre>
+ * <pre>java -cp BpIde-8.5.jar com.mycompany.bpide.GuionSmoke [ruta de bpvm-sim.exe]</pre>
  * Lo que se mira: la forma de una línea, ida y vuelta; que un guion con errores los diga todos, con su línea, y no haga nada;
  * que se haga en orden y pare en el primero que falla; «rw» (el de una línea y el del guion) y «mostrar»; que lo que no se
  * deshace se pregunte, diciendo qué línea lo pide; pararlo; uno a la vez; la IA, por su servidor y sin salir de su carpeta; y

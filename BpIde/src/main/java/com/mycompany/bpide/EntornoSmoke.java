@@ -24,7 +24,7 @@ import javax.swing.SwingUtilities;
 /**
  * V9 #876 (25-nov) — la prueba de los comandos del entorno ({@link EntornoPlaca}) contra el micro simulado, que habla el
  * mismo protocolo que una placa, sin enseñar ninguna ventana:
- * <pre>java -cp BpIde-8.1.jar com.mycompany.bpide.EntornoSmoke [ruta de bpvm-sim.exe]</pre>
+ * <pre>java -cp BpIde-8.5.jar com.mycompany.bpide.EntornoSmoke [ruta de bpvm-sim.exe]</pre>
  * Lo que se mira: listar, poner y borrar, con lo que había antes; lo que no se deja (las de las particiones, también en
  * mayúsculas, y lo que la placa no guardaría bien) sin tocar la placa; un valor con comillas y acentos, de vuelta igual;
  * que el diálogo abierto vea un cambio que no ha hecho él; y la IA, por su servidor: las tres herramientas, y sin poder

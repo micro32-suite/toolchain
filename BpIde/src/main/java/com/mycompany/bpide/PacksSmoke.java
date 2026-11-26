@@ -17,7 +17,7 @@ import javax.swing.SwingUtilities;
 /**
  * V9 #875 (25-nov) — la prueba de los comandos de los packs ({@link PacksPlaca}) contra el micro simulado, sin enseñar
  * ninguna ventana:
- * <pre>java -cp BpIde-8.1.jar com.mycompany.bpide.PacksSmoke [ruta de bpvm-sim.exe]</pre>
+ * <pre>java -cp BpIde-8.5.jar com.mycompany.bpide.PacksSmoke [ruta de bpvm-sim.exe]</pre>
  * Lo que se mira: listar, grabar (por su nombre y un fichero), los ficheros de uno, dos con el mismo nombre, retirar y
  * formatear; lo que no se deja; que formatear, pedido por su nombre (la IA), se lo pregunte antes a la persona —con la placa
  * y lo que se pierde— y con un no no lo haga; el panel abierto, que ve lo que hace otro; y la IA por su servidor. Lo de la

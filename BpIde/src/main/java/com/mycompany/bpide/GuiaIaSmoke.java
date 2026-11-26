@@ -9,7 +9,7 @@ import java.util.List;
 /**
  * V9 #893 (25-nov) — la guía para IA que deja el IDE en una carpeta ({@link GuiaIa}): la escribe si falta, la deja si es la
  * suya, pone al día la de otro IDE que nadie ha cambiado, y no toca una cambiada ni una sin su marca.
- * <pre>java -cp BpIde-8.1.jar com.mycompany.bpide.GuiaIaSmoke</pre>
+ * <pre>java -cp BpIde-8.5.jar com.mycompany.bpide.GuiaIaSmoke</pre>
  * Sale con 0 si todo va bien.
  */
 public final class GuiaIaSmoke {
