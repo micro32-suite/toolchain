@@ -402,7 +402,7 @@ public final class PacksPlaca {
         }
         if (!f.isFile()) return noVale(p, "no existe el fichero " + f);
         avance("grabando " + f.getName() + "…");
-        return cambiando(p, c -> graba(c, f, perfil.get(), consola, (hechos, total) -> {
+        return cambiando(p, "grabando el pack " + f.getName(), c -> graba(c, f, perfil.get(), consola, (hechos, total) -> {
             final int pct = total > 0 ? (int) ((hechos * 100L) / total) : 0;
             avance("grabando " + f.getName() + "… " + pct + " %  (" + (hechos / 1024) + "/" + (total / 1024) + " KB)");
         }), g -> {
@@ -429,7 +429,7 @@ public final class PacksPlaca {
         final String nombre = texto(p.get("pack"));
         final long offset = numero(p.get("offset"));
         if (nombre == null && offset < 0) return noVale(p, "pack_borrar: di el pack, por su nombre o por su offset");
-        return cambiando(p, c -> {
+        return cambiando(p, "retirando " + (nombre != null ? "el pack " + nombre : "el pack del offset " + offset), c -> {
             BpvmClient.PackTable t = c.packList(T);
             List<BpvmClient.PackInfo> activos = new ArrayList<>();
             for (BpvmClient.PackInfo pi : t.packs) {
@@ -462,7 +462,7 @@ public final class PacksPlaca {
     /** «packs_formatear»: deja vacía la zona. La IA no llega aquí sin el sí de la persona (su pregunta, en el registro). */
     private CompletableFuture<Resultado> formatea(Map<String, Object> p) {
         avance("formateando zona de packs…");
-        return cambiando(p, c -> { c.packFormat(T_FLASH); return Boolean.TRUE; }, x -> {
+        return cambiando(p, "formateando la zona", c -> { c.packFormat(T_FLASH); return Boolean.TRUE; }, x -> {
             consola.accept("[Packs] zona de packs formateada");
             return "zona de packs formateada";
         }, (x, r) -> r);
@@ -577,9 +577,24 @@ public final class PacksPlaca {
 
     /** Lo que cambia la zona: tras hacerlo (`hecho`: qué, para el mensaje), la placa puede reiniciarse sola (#671): se la
      *  espera y se reconecta; y la zona como queda va en el resultado, con lo suyo (`datos`). */
-    private <R> CompletableFuture<Resultado> cambiando(Map<String, Object> p, Tarea<R> tarea,
+    /** V9 #913 — LO QUE ESTÁ CAMBIANDO LA ZONA AHORA (grabar, retirar o formatear), y desde cuándo; null: nada. Una cosa
+     *  cada vez: dos grabaciones a la vez van por el mismo cable, se mezclan, y la placa rechaza las dos («sesión de
+     *  burn inválida»). Lo vio la prueba de la IA de la V8.5: su llamada al guion se le cortó por tiempo (`#914`) mientras
+     *  el IDE seguía grabando, y lanzó ella otra grabación del mismo pack. */
+    private final java.util.concurrent.atomic.AtomicReference<String> cambiandoAhora =
+            new java.util.concurrent.atomic.AtomicReference<>();
+    private static final DateTimeFormatter HORA = DateTimeFormatter.ofPattern("HH:mm:ss").withZone(ZoneId.systemDefault());
+
+    private <R> CompletableFuture<Resultado> cambiando(Map<String, Object> p, String haciendo, Tarea<R> tarea,
             java.util.function.Function<R, String> hecho, BiFunction<R, Resultado, Resultado> datos) {
+        final String esto = haciendo + " (desde las " + HORA.format(Instant.now()) + ")";
+        if (!cambiandoAhora.compareAndSet(null, esto)) {
+            return noVale(p, "la placa está ocupada: " + cambiandoAhora.get() + ". En la zona de packs, una cosa cada"
+                    + " vez: cuando acabe, «packs_listar» lo dirá (sigue en marcha aunque a quien la pidió se le haya"
+                    + " cortado la espera)");
+        }
         final CompletableFuture<Resultado> fin = new CompletableFuture<>();
+        fin.whenComplete((r, e) -> cambiandoAhora.compareAndSet(esto, null));
         corre(p, tarea, (c, r) -> {
             final String que = hecho.apply(r);
             if (!c.reiniciaTrasPack()) {

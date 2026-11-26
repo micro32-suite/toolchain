@@ -7,6 +7,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.swing.JLabel;
@@ -255,6 +256,21 @@ public final class PacksSmoke {
         } finally {
             ia.para();
         }
+
+        // 12. V9 #913 — una cosa cada vez en la zona: lo que la cambia, mientras otro la cambia, «ocupada» (la prueba de la IA
+        //     de la V8.5: dos grabaciones a la vez, por el mismo cable, y la placa rechazó las dos); listar, sí
+        CompletableFuture<Resultado> primera = cs.ejecuta("pack_grabar", p("pack", "Stdlib"));
+        r = haz(cs, "pack_grabar", "pack", "DriverSpi");
+        mira(!r.ok && r.mensaje.contains("ocupada") && r.mensaje.contains("Stdlib"),
+                "otra grabación, mientras graba: " + r.mensaje);
+        r = haz(cs, "pack_borrar", "pack", "DriverSpi");
+        mira(!r.ok && r.mensaje.contains("ocupada"), "retirar, mientras graba: " + r.mensaje);
+        r = haz(cs, "packs_listar");
+        mira(r.ok, "listar, mientras graba, sí: " + r.mensaje);
+        r = primera.get(120, TimeUnit.SECONDS);
+        mira(r.ok, "la primera acaba bien: " + r.mensaje);
+        r = haz(cs, "pack_borrar", "pack", "DriverSpi");
+        mira(r.ok, "y acabada, lo siguiente: " + r.mensaje);
     }
 
     private static String corto(Map<?, ?> r) {

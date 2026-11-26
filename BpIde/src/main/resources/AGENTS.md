@@ -118,6 +118,11 @@ code. Files on the PC: only inside the folder the user allowed.
   SQLite) needs its RAM block (`packRam` or `SQLite`, in the environment) and the board rebooted BEFORE it is burnt.
   Which packs each board takes, in which order and with which settings: `@INSTALACION@docs/en/INSTALAR_FIRMWARE.md`,
   "The board's packs". They are the board's, not the program's: ask the user before changing them.
+- **A long tool may outlast your wait.** A script (`guion`) or burning a big pack (the GUI's) takes a minute or more, and
+  your client may stop waiting first («The operation timed out»): the IDE carries on. Do not start another one: ask
+  `packs_listar` until it is done; meanwhile the IDE answers «ocupada» to what would clash with it.
+- **A new or erased board has no BasicPlus** (`… no contesta como una placa de BasicPlus …`): flash this installation's
+  image first, as `@INSTALACION@docs/en/INSTALAR_FIRMWARE.md` says for that board.
 - **The board's settings** (its environment variables: the memory for its packs, the panel, the SD card, the radio…)
   live in its flash, outside its files: `entorno_listar`, `entorno_poner` and `entorno_borrar`. Which ones there are, and
   their values for each board: appendix A of the reference. Most are read when the board starts: after changing one,

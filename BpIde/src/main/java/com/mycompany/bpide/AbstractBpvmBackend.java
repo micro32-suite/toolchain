@@ -64,7 +64,7 @@ public abstract class AbstractBpvmBackend implements Backend {
         openTransport(endpoint, c);
         if (!c.isHandshakeDone()) {
             c.close();
-            throw new IOException("handshake con " + endpoint + " no completado");
+            throw new IOException(endpoint + " " + c.porQueNoSaluda());   // V9 #915: qué llega y qué hacer
         }
         try { postConnect(c); } catch (IOException ignored) { /* best effort */ }
         this.client = c;

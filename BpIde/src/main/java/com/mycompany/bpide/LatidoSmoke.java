@@ -241,6 +241,29 @@ public final class LatidoSmoke {
             mira(fin[0] != null && fin[0].contains("desconectado"), "lo dice: " + fin[0]);
         }
 
+        System.out.println("-- V9 #915: una placa en blanco (su ROM repite «invalid header» sin parar): el saludo acaba y lo dice");
+        try (java.net.ServerSocket rom = new java.net.ServerSocket(0)) {
+            Thread habla = new Thread(() -> {
+                try (java.net.Socket s = rom.accept()) {
+                    byte[] linea = "invalid header: 0xffffffff\r\n".getBytes(StandardCharsets.US_ASCII);
+                    for (;;) { s.getOutputStream().write(linea); s.getOutputStream().flush(); Thread.sleep(50); }
+                } catch (Exception fin) { /* cerrado */ }
+            });
+            habla.setDaemon(true);
+            habla.start();
+            long t0 = System.currentTimeMillis();
+            String dice = null;
+            try {
+                new RedRapida().connect(Integer.toString(rom.getLocalPort()));
+            } catch (IOException e) {
+                dice = e.getMessage();
+            }
+            long ms = System.currentTimeMillis() - t0;
+            mira(dice != null && ms < 15_000, "no se queda esperando (" + ms + " ms)");
+            mira(dice != null && dice.contains("no contesta como una placa de BasicPlus") && dice.contains("invalid header")
+                    && dice.contains("INSTALAR_FIRMWARE"), "y dice qué llega y qué hacer: " + dice);
+        }
+
         System.out.println(fallos == 0 ? "LATIDO OK" : "LATIDO: " + fallos + " FALLO(S)");
         System.exit(fallos == 0 ? 0 : 1);
     }

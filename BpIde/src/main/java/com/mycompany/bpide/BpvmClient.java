@@ -495,11 +495,38 @@ public final class BpvmClient implements AutoCloseable {
         doHandshake();
     }
 
+    /** V9 #915 — EL SALUDO, CON TOPE. Se espera como todo, por actividad (#454), pero como mucho esto: una placa viva
+     *  contesta al HELLO en menos de un segundo, también con un programa en marcha. Sin tope, una ESP32 en blanco —su ROM
+     *  repite «invalid header: 0xffffffff» sin parar— lo tenía esperando para siempre: en la prueba de la IA de la V8.5,
+     *  `bp placa COM15 info` se quedó colgado, con el puerto, y nadie dijo que a la placa le faltaba la imagen. */
+    private static final long HELLO_TOPE_MS = 10_000L;
+
+    /** V9 #915 — la última línea que llegó y no era del wire (la ROM de una placa en blanco, un monitor serie…): para
+     *  decir qué hay al otro lado cuando no saluda. */
+    private volatile String lineaAjena = null;
+
+    /** Por qué no se completó el saludo, para quien conectaba: qué llega por el cable y qué hacer. */
+    public String porQueNoSaluda() {
+        String ajena = lineaAjena;
+        if (ajena != null) {
+            return "no contesta como una placa de BasicPlus: llega otra cosa («" + ajena + "»). Si la placa es nueva o la"
+                    + " has borrado, grábale la imagen de BasicPlus (docs/INSTALAR_FIRMWARE.md)";
+        }
+        return "no contesta: ¿es el puerto de la placa? Si la placa es nueva o la has borrado, grábale la imagen de"
+                + " BasicPlus (docs/INSTALAR_FIRMWARE.md)";
+    }
+
     /** v1 handshake: client → HELLO request; server → HELLO_REPLY.
      *  Bloquea hasta recibir el HELLO_REPLY o un timeout corto. */
     private void doHandshake() {
         try {
-            Map<String, Object> resp = sendRequest("HELLO", HELLO_CAMPOS, null, 5000);
+            Map<String, Object> resp;
+            try {
+                resp = esperarPeticion(enviarPeticion("HELLO", HELLO_CAMPOS, null, 0), 5000, HELLO_TOPE_MS);
+            } catch (WireError we) {   // #693, como sendRequest: una línea que le llegó cortada, una vez más
+                if (!LINEA_ESTANCADA.equals(we.code)) throw we;
+                resp = esperarPeticion(enviarPeticion("HELLO", HELLO_CAMPOS, null, 0), 5000, HELLO_TOPE_MS);
+            }
             aprenderHello(resp);
             diag("[BpvmClient] handshake con VM: " + Json.getString(resp, "serverName", "?")
                     + " " + serverBuild
@@ -855,7 +882,7 @@ public final class BpvmClient implements AutoCloseable {
      *  respuesta que tardara más de 250 ms se daba por perdida. Lo destapó la segunda vez de #693, que llega justo
      *  tras una primera sin respuesta: tenía 250 ms. */
     private Map<String, Object> esperarPorActividad(CompletableFuture<Map<String, Object>> f,
-                                                    long inactividadMs)
+                                                    long inactividadMs, long topeMs)
             throws InterruptedException, java.util.concurrent.ExecutionException, TimeoutException {
         final long RODAJA_MS = 250L;
         final long desde = System.currentTimeMillis();
@@ -863,7 +890,9 @@ public final class BpvmClient implements AutoCloseable {
             try {
                 return f.get(RODAJA_MS, TimeUnit.MILLISECONDS);
             } catch (TimeoutException te) {
-                if (System.currentTimeMillis() - Math.max(lastRxMillis, desde) > inactividadMs) throw te;
+                long ahora = System.currentTimeMillis();
+                if (ahora - Math.max(lastRxMillis, desde) > inactividadMs) throw te;
+                if (topeMs > 0 && ahora - desde > topeMs) throw te;   // V9 #915: el saludo, con tope
                 /* siguen llegando bytes: el cable esta vivo, se sigue esperando */
             }
         }
@@ -998,6 +1027,11 @@ public final class BpvmClient implements AutoCloseable {
 
     /** La mitad de sendRequest que ESPERA la respuesta de una petición ya mandada. */
     private Map<String, Object> esperarPeticion(Pendiente p, long timeoutMs) throws IOException {
+        return esperarPeticion(p, timeoutMs, 0);
+    }
+
+    /** Lo mismo, y como mucho {@code topeMs} en total aunque el cable no calle (0: sin tope). V9 #915. */
+    private Map<String, Object> esperarPeticion(Pendiente p, long timeoutMs, long topeMs) throws IOException {
         final long id = p.id;
         final String type = p.type;
         final CompletableFuture<Map<String, Object>> future = p.future;
@@ -1007,7 +1041,7 @@ public final class BpvmClient implements AutoCloseable {
              * mandarlos durante `timeoutMs`, sí. El plazo pasa de "cuánto puede
              * tardar la respuesta" a "cuánto puede callar el cable", que es lo
              * que un timeout debe medir. */
-            Map<String, Object> resp = esperarPorActividad(future, timeoutMs);
+            Map<String, Object> resp = esperarPorActividad(future, timeoutMs, topeMs);
             String respType = Json.getString(resp, "type", "");
             if ("ERROR".equals(respType)) {
                 throw new WireError(Json.getString(resp, "code", "?"),
@@ -2112,6 +2146,8 @@ public final class BpvmClient implements AutoCloseable {
                     m = Json.parseFlatObject(line);
                 } catch (Throwable t) {
                     diag("[BpvmClient] línea no parseable: " + line);
+                    String l = line.trim();   // V9 #915: para decir qué hay al otro lado si no saluda
+                    if (!l.isEmpty()) lineaAjena = l.length() > 60 ? l.substring(0, 60) + "…" : l;
                     continue;
                 }
                 // Si el frame trae bulk, leerlo del wire antes de procesar.
